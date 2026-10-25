@@ -1,4 +1,4 @@
-package com.pueblo.api;
+package com.pueblo.common.security.validation;
 
 import java.net.URI;
 import java.util.Set;

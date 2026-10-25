@@ -1,6 +1,7 @@
 package com.pueblo.member;
 
 import com.fasterxml.jackson.databind.*;
+import com.pueblo.common.exception.BusinessException;
 import com.pueblo.member.auth.*;
 import com.pueblo.member.mail.*;
 import jakarta.servlet.http.Cookie;
@@ -20,7 +21,6 @@ import org.springframework.test.web.servlet.*;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.*;
 import static org.assertj.core.api.Assertions.*;
-
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -168,7 +168,7 @@ class AuthenticationIntegrationTest {
         var rotated=auth.refresh(initial.refreshToken()); assertThat(rotated.sessionExpiresAt()).isEqualTo(initial.sessionExpiresAt());
         mvc.perform(get("/api/v1/me").header("Authorization","Bearer "+rotated.refreshToken())).andExpect(status().isUnauthorized());
         clock.now=initial.sessionExpiresAt().plusSeconds(1);
-        assertThatThrownBy(()->auth.refresh(rotated.refreshToken())).isInstanceOf(com.pueblo.api.ApiException.class);
+        assertThatThrownBy(()->auth.refresh(rotated.refreshToken())).isInstanceOf(BusinessException.class);
     }
     @Test void verifiedAccountCannotRequestAnotherVerificationEmail() throws Exception {
         active();
@@ -194,9 +194,9 @@ class AuthenticationIntegrationTest {
     @Test void resendInvalidatesOldLinkAndExpiredLinkFails() {
         auth.signup(email,password,"nickname",consents); String old=deliveredToken();
         auth.requestVerification(email); String fresh=deliveredToken();
-        assertThatThrownBy(()->auth.verifyEmail(old)).isInstanceOf(com.pueblo.api.ApiException.class);
+        assertThatThrownBy(()->auth.verifyEmail(old)).isInstanceOf(BusinessException.class);
         clock.now=clock.now.plusSeconds(1801);
-        assertThatThrownBy(()->auth.verifyEmail(fresh)).isInstanceOf(com.pueblo.api.ApiException.class);
+        assertThatThrownBy(()->auth.verifyEmail(fresh)).isInstanceOf(BusinessException.class);
         assertThat(jdbc.queryForObject("SELECT status FROM member_user",String.class)).isEqualTo("PENDING");
     }
     @Test void duplicateAndMalformedConsentHaveNoPartialWrites() throws Exception {

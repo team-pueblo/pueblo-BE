@@ -1,6 +1,9 @@
 package com.pueblo.api;
+
+import com.pueblo.common.security.validation.ExternalUrlPolicy;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
+
 class ExternalUrlPolicyTest {
     @Test void allowsHttpsAndExplicitLocalHttpOnly() {
         assertThat(ExternalUrlPolicy.requireWebUrl("https://shop.example",false,true).getHost()).isEqualTo("shop.example");

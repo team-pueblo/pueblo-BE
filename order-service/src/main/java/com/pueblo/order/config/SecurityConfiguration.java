@@ -1,5 +1,9 @@
 package com.pueblo.order.config;
 
+import com.pueblo.common.security.ApiAccessDeniedHandler;
+import com.pueblo.common.security.ApiAuthenticationEntryPoint;
+import com.pueblo.common.security.ApiCorsProcessor;
+import com.pueblo.common.security.validation.ExternalUrlPolicy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,14 +18,14 @@ public class SecurityConfiguration {
         var source=new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
         var config=new org.springframework.web.cors.CorsConfiguration();
         var allowed=java.util.Arrays.stream(origins.split(",")).map(String::trim).filter(s->!s.isEmpty()).toList();
-        allowed.forEach(s->com.pueblo.api.ExternalUrlPolicy.requireWebUrl(s,true,true));
+        allowed.forEach(s->ExternalUrlPolicy.requireWebUrl(s,true,true));
         config.setAllowedOrigins(allowed);
         config.setAllowedMethods(java.util.List.of("GET","POST","OPTIONS"));
         config.setAllowedHeaders(java.util.List.of("Authorization","Content-Type","Idempotency-Key","X-Request-ID","Accept-Language"));
         config.setAllowCredentials(false);
         source.registerCorsConfiguration("/**",config);
         var cors=new org.springframework.web.filter.CorsFilter(source);
-        cors.setCorsProcessor(new com.pueblo.api.ApiCorsProcessor(mapper));
+        cors.setCorsProcessor(new ApiCorsProcessor(mapper));
         if(clients.getIfAvailable()!=null) http.addFilterBefore(new MemberAuthenticationFilter(clients.getObject(),mapper),
                 org.springframework.security.web.authentication.AnonymousAuthenticationFilter.class);
         return http
@@ -36,8 +40,8 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/v1/checkout/quotes","/api/v1/orders","/api/v1/me/orders","/api/v1/me/orders/**").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
-                        .accessDeniedHandler((request,response,error)->com.pueblo.api.ApiErrors.write(mapper,request,response,com.pueblo.api.ErrorCode.ACCESS_DENIED))
-                        .authenticationEntryPoint((request,response,error)->com.pueblo.api.ApiErrors.write(mapper,request,response,com.pueblo.api.ErrorCode.INVALID_CREDENTIALS)))
+                        .accessDeniedHandler(new ApiAccessDeniedHandler(mapper))
+                        .authenticationEntryPoint(new ApiAuthenticationEntryPoint(mapper)))
                 .build();
     }
 }

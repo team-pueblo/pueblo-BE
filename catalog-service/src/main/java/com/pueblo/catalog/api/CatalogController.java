@@ -1,11 +1,11 @@
 package com.pueblo.catalog.api;
 
-import com.pueblo.api.ApiResponse;
+import com.pueblo.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import org.springframework.web.bind.annotation.*;
 import static com.pueblo.catalog.api.CatalogModels.*;
 
 @RestController

@@ -1,10 +1,10 @@
 package com.pueblo.member.auth;
 
+import com.pueblo.common.exception.BusinessException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 
@@ -45,7 +45,7 @@ public class TokenService {
         }
         try {
             if(!refreshStore.isActive(session.id())) throw new BadJwtException("Inactive credential store");
-        } catch(com.pueblo.api.ApiException ex) {
+        } catch(BusinessException ex) {
             throw ex;
         }
         return jwt;

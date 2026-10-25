@@ -1,11 +1,12 @@
 package com.pueblo.payment.config;
 
+import com.pueblo.common.security.ApiAccessDeniedHandler;
+import com.pueblo.common.security.ApiAuthenticationEntryPoint;
+import com.pueblo.common.security.ApiCorsProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 
 @Configuration
 public class SecurityConfiguration {
@@ -15,7 +16,7 @@ public class SecurityConfiguration {
         var source=new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**",new org.springframework.web.cors.CorsConfiguration());
         var cors=new org.springframework.web.filter.CorsFilter(source);
-        cors.setCorsProcessor(new com.pueblo.api.ApiCorsProcessor(mapper));
+        cors.setCorsProcessor(new ApiCorsProcessor(mapper));
         return http
                 .cors(c->c.disable()).addFilterBefore(cors,org.springframework.security.web.csrf.CsrfFilter.class)
                 .sessionManagement(s->s.sessionCreationPolicy(org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
@@ -26,8 +27,8 @@ public class SecurityConfiguration {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
-                        .accessDeniedHandler((request,response,error)->com.pueblo.api.ApiErrors.write(mapper,request,response,com.pueblo.api.ErrorCode.ACCESS_DENIED))
-                        .authenticationEntryPoint((request,response,error)->com.pueblo.api.ApiErrors.write(mapper,request,response,com.pueblo.api.ErrorCode.INVALID_CREDENTIALS)))
+                        .accessDeniedHandler(new ApiAccessDeniedHandler(mapper))
+                        .authenticationEntryPoint(new ApiAuthenticationEntryPoint(mapper)))
                 .build();
     }
 }

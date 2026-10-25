@@ -1,6 +1,8 @@
 package com.pueblo.member.auth;
 
-import com.pueblo.api.ApiException;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
+import com.pueblo.member.exception.MemberErrorCode;
 import com.pueblo.member.mail.AuthMailJobs;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -11,7 +13,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -27,7 +28,7 @@ public class AuthService {
     public record Tokens(String accessToken, String refreshToken, Instant sessionExpiresAt, UserView user) {
         @Override public String toString() { return "Tokens[redacted]"; }
     }
-    private record Rotation(Tokens tokens, ApiException error) { }
+    private record Rotation(Tokens tokens, BusinessException error) { }
     private record OneTime(String id, String userId, String purpose, Instant expiresAt, Instant usedAt) { }
     private final RedisRefreshTokens refreshStore;
     private final JdbcTemplate jdbc;
@@ -54,7 +55,7 @@ public class AuthService {
         Map<String,String> required = Map.of("TERMS", properties.termsVersion(), "PRIVACY", properties.privacyVersion());
         if (consents == null || consents.size()!=2 || consents.stream().anyMatch(java.util.Objects::isNull) || consents.stream().map(Consent::policyType).distinct().count()!=2
                 || consents.stream().anyMatch(c -> !c.agreed() || c.version()==null || !c.version().equals(required.get(c.policyType())))) {
-            throw new ApiException(com.pueblo.api.ErrorCode.CONSENT_REQUIRED);
+            throw new BusinessException(MemberErrorCode.CONSENT_REQUIRED);
         }
         limits.check("signup", email, 5, Duration.ofHours(1));
         String hash = passwords.encode(password);
@@ -68,7 +69,7 @@ public class AuthService {
                 issueOneTime(id,"VERIFY",Duration.ofMinutes(30));
             });
         } catch (DuplicateKeyException ex) {
-            throw new ApiException(com.pueblo.api.ErrorCode.EMAIL_ALREADY_EXISTS);
+            throw new BusinessException(MemberErrorCode.EMAIL_ALREADY_EXISTS);
         }
     }
     public Tokens login(String rawEmail, String password) {
@@ -76,11 +77,11 @@ public class AuthService {
         limits.check("login", email, 10, Duration.ofMinutes(15));
         var found=repository.byEmail(email);
         boolean matched=passwords.matches(password, found.map(AuthRepository.User::passwordHash).orElse(dummyHash));
-        if (!matched || found.isEmpty() || !"ACTIVE".equals(found.get().status())) throw ApiException.unauthorized();
+        if (!matched || found.isEmpty() || !"ACTIVE".equals(found.get().status())) throw BusinessException.unauthorized();
         AuthRepository.User candidate=found.get();
         return transaction.execute(status -> {
-            AuthRepository.User user=repository.byId(candidate.id(),true).orElseThrow(ApiException::unauthorized);
-            if (!user.passwordHash().equals(candidate.passwordHash()) || !"ACTIVE".equals(user.status())) throw ApiException.unauthorized();
+            AuthRepository.User user=repository.byId(candidate.id(),true).orElseThrow(BusinessException::unauthorized);
+            if (!user.passwordHash().equals(candidate.passwordHash()) || !"ACTIVE".equals(user.status())) throw BusinessException.unauthorized();
             String session=UUID.randomUUID().toString();
             Instant expires=clock.instant().plus(Duration.ofDays(14)).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
             jdbc.update("INSERT INTO auth_session (id,user_id,created_at,expires_at) VALUES (?,?,?,?)", session,user.id(),now(),Timestamp.from(expires));
@@ -91,24 +92,24 @@ public class AuthService {
     }
     public Tokens refresh(String raw) {
         Jwt jwt;
-        try { jwt=tokens.decodeRefresh(raw); } catch (JwtException | IllegalArgumentException ex) { throw ApiException.unauthorized(); }
+        try { jwt=tokens.decodeRefresh(raw); } catch (JwtException | IllegalArgumentException ex) { throw BusinessException.unauthorized(); }
         String sessionId=jwt.getClaimAsString("sid");
         limits.check("refresh", sessionId, 60, Duration.ofMinutes(1));
         Rotation result=transaction.execute(status -> {
             // Match lock ordering with password reset/login: user before sessions/tokens.
-            var initial=repository.session(sessionId,false).orElseThrow(ApiException::unauthorized);
-            var user=repository.byId(initial.userId(),true).orElseThrow(ApiException::unauthorized);
-            var session=repository.session(sessionId,true).orElseThrow(ApiException::unauthorized);
+            var initial=repository.session(sessionId,false).orElseThrow(BusinessException::unauthorized);
+            var user=repository.byId(initial.userId(),true).orElseThrow(BusinessException::unauthorized);
+            var session=repository.session(sessionId,true).orElseThrow(BusinessException::unauthorized);
             if (!session.userId().equals(jwt.getSubject()) || session.revokedAt()!=null
-                    || !session.expiresAt().isAfter(clock.instant()) || !"ACTIVE".equals(user.status())) throw ApiException.unauthorized();
+                    || !session.expiresAt().isAfter(clock.instant()) || !"ACTIVE".equals(user.status())) throw BusinessException.unauthorized();
             var issued=issue(user,sessionId,session.expiresAt());
             long outcome=refreshStore.rotate(sessionId,raw,issued.refreshToken());
-            if(outcome==2) return new Rotation(null,new ApiException(com.pueblo.api.ErrorCode.REFRESH_ALREADY_ROTATED));
+            if(outcome==2) return new Rotation(null,new BusinessException(MemberErrorCode.REFRESH_ALREADY_ROTATED));
             if(outcome==3) {
                 jdbc.update("UPDATE auth_session SET revoked_at=? WHERE id=?",now(),sessionId);
-                return new Rotation(null,new ApiException(com.pueblo.api.ErrorCode.REFRESH_REUSE_DETECTED));
+                return new Rotation(null,new BusinessException(MemberErrorCode.REFRESH_REUSE_DETECTED));
             }
-            if(outcome!=1) throw ApiException.unauthorized();
+            if(outcome!=1) throw BusinessException.unauthorized();
             return new Rotation(issued,null);
         });
         if (result.error()!=null) throw result.error();
@@ -121,7 +122,7 @@ public class AuthService {
         transaction.executeWithoutResult(status -> {
             var session=repository.session(jwt.getClaimAsString("sid"),false);
             if (session.isEmpty() || !session.get().userId().equals(jwt.getSubject())) return;
-            repository.byId(session.get().userId(),true).orElseThrow(ApiException::unauthorized);
+            repository.byId(session.get().userId(),true).orElseThrow(BusinessException::unauthorized);
             refreshStore.delete(session.get().id());
             jdbc.update("UPDATE auth_session SET revoked_at=COALESCE(revoked_at,?) WHERE id=?",now(),session.get().id());
         });
@@ -134,9 +135,9 @@ public class AuthService {
         var user=repository.byEmail(email);
         if (user.isEmpty()) return;
         transaction.executeWithoutResult(status -> {
-            var locked=repository.byId(user.get().id(),true).orElseThrow(ApiException::unauthorized);
+            var locked=repository.byId(user.get().id(),true).orElseThrow(BusinessException::unauthorized);
             if (purpose.equals("VERIFY") && locked.status().equals("ACTIVE")) {
-                throw new ApiException(com.pueblo.api.ErrorCode.EMAIL_ALREADY_VERIFIED);
+                throw new BusinessException(MemberErrorCode.EMAIL_ALREADY_VERIFIED);
             }
             if ((purpose.equals("VERIFY") && !locked.status().equals("PENDING"))
                     || (purpose.equals("RESET") && !locked.status().equals("ACTIVE"))) return;
@@ -184,7 +185,7 @@ public class AuthService {
         String refresh=tokens.issue(user,sessionId,jti,"refresh",expires);
         return new Tokens(tokens.issue(user,sessionId,UUID.randomUUID().toString(),"access",expires),refresh,expires,view(user));
     }
-    public UserView me(String id) { return view(repository.byId(id,false).orElseThrow(ApiException::unauthorized)); }
+    public UserView me(String id) { return view(repository.byId(id,false).orElseThrow(BusinessException::unauthorized)); }
     private static UserView view(AuthRepository.User user) { return new UserView(user.id(),user.email(),user.nickname()); }
     private Timestamp now() { return Timestamp.from(clock.instant()); }
     public static String email(String value) {
@@ -196,6 +197,6 @@ public class AuthService {
     private static void validatePassword(String value) {
         if (value==null || value.isBlank() || value.length()<10 || value.length()>128) throw invalid();
     }
-    private static ApiException invalid() { return new ApiException(com.pueblo.api.ErrorCode.INVALID_INPUT); }
-    private static ApiException expired() { return new ApiException(com.pueblo.api.ErrorCode.TOKEN_EXPIRED_OR_USED); }
+    private static BusinessException invalid() { return new BusinessException(CommonErrorCode.INVALID_INPUT); }
+    private static BusinessException expired() { return new BusinessException(MemberErrorCode.TOKEN_EXPIRED_OR_USED); }
 }

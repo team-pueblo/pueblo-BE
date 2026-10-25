@@ -203,7 +203,7 @@ class OrderFlowIntegrationTest {
         },id.toString());
         order.getBean(EventPublisher.class).publish(new OutboxRecord(OrderService.COMMANDS_TOPIC,id.toString(),event));
         await().atMost(Duration.ofSeconds(15)).untilAsserted(()->assertThat(catalogDb.queryForObject(
-                "SELECT status FROM inventory_reservation WHERE order_id=?",String.class,id.toString())).isEqualTo("RELEASED"));
+                "SELECT COUNT(*) FROM inventory_reservation WHERE order_id=? AND status='RELEASED'",Integer.class,id.toString())).isEqualTo(1));
         settle(id,"CANCELED");
         await().atMost(Duration.ofSeconds(15)).untilAsserted(()->{
             dispatch(order); dispatch(catalog);

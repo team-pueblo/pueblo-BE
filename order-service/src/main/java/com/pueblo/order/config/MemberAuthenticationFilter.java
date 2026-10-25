@@ -1,7 +1,9 @@
 package com.pueblo.order.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pueblo.api.*;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
+import com.pueblo.common.security.ApiSecurityErrorWriter;
 import com.pueblo.order.checkout.ServiceClients;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
@@ -25,12 +27,12 @@ final class MemberAuthenticationFilter extends OncePerRequestFilter {
             try {
                 if(!header.startsWith("Bearer ") || header.length()>8192 || header.substring(7).isBlank()
                         || java.util.Collections.list(request.getHeaders("Authorization")).size()!=1)
-                    throw new ApiException(ErrorCode.INVALID_CREDENTIALS);
+                    throw new BusinessException(CommonErrorCode.INVALID_CREDENTIALS);
                 var user=clients.member(header);
                 var context=SecurityContextHolder.createEmptyContext();
                 context.setAuthentication(new UsernamePasswordAuthenticationToken(user.toString(),null,List.of()));
                 SecurityContextHolder.setContext(context);
-            } catch(ApiException ex) { ApiErrors.write(mapper,request,response,ex.code()); return; }
+            } catch(BusinessException ex) { ApiSecurityErrorWriter.write(mapper,request,response,ex.code()); return; }
         }
         chain.doFilter(request,response);
     }

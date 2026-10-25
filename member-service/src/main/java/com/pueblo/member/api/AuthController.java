@@ -1,12 +1,12 @@
 package com.pueblo.member.api;
 
-import com.pueblo.api.ApiResponse;
+import com.pueblo.common.response.ApiResponse;
+import com.pueblo.member.auth.*;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import io.swagger.v3.oas.annotations.media.Schema;
-import com.pueblo.member.auth.*;
 import jakarta.servlet.http.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;

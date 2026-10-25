@@ -2,9 +2,11 @@ package com.pueblo.order.checkout;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pueblo.api.ApiException;
-import com.pueblo.api.ErrorCode;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
+import com.pueblo.common.exception.ErrorCode;
 import com.pueblo.messaging.*;
+import com.pueblo.order.exception.OrderErrorCode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Timestamp;
@@ -47,9 +49,9 @@ public final class OrderService {
         Map<String,Item> combined=new TreeMap<>();
         for (Item item:requested) {
             Item before=combined.get(item.skuId().toString());
-            if(before!=null && !before.productId().equals(item.productId())) throw error(ErrorCode.INVALID_INPUT);
+            if(before!=null && !before.productId().equals(item.productId())) throw error(CommonErrorCode.INVALID_INPUT);
             int quantity=item.quantity()+(before==null?0:before.quantity());
-            if(quantity>9) throw error(ErrorCode.QUANTITY_LIMIT_EXCEEDED);
+            if(quantity>9) throw error(OrderErrorCode.QUANTITY_LIMIT_EXCEEDED);
             combined.put(item.skuId().toString(),new Item(item.productId(),item.skuId(),quantity));
         }
         Map<UUID,com.fasterxml.jackson.databind.JsonNode> products=new HashMap<>();
@@ -57,17 +59,17 @@ public final class OrderService {
         for(Item item:combined.values()) {
             var product=products.computeIfAbsent(item.productId(),clients::product);
             if(!product.path("id").asText().equals(item.productId().toString()) || !"KRW".equals(product.path("currency").asText())
-                    || !"ON_SALE".equals(product.path("saleStatus").asText())) throw error(ErrorCode.PRODUCT_UNAVAILABLE);
+                    || !"ON_SALE".equals(product.path("saleStatus").asText())) throw error(OrderErrorCode.PRODUCT_UNAVAILABLE);
             com.fasterxml.jackson.databind.JsonNode sku=null;
             for(var candidate:product.path("skus")) if(candidate.path("id").asText().equals(item.skuId().toString())) sku=candidate;
             if(sku==null || !"ON_SALE".equals(sku.path("saleStatus").asText()) || sku.path("availableQuantity").asInt(-1)<item.quantity())
-                throw error(ErrorCode.PRODUCT_UNAVAILABLE);
-            if(sku.path("purchaseLimit").asInt(-1)<item.quantity()) throw error(ErrorCode.QUANTITY_LIMIT_EXCEEDED);
+                throw error(OrderErrorCode.PRODUCT_UNAVAILABLE);
+            if(sku.path("purchaseLimit").asInt(-1)<item.quantity()) throw error(OrderErrorCode.QUANTITY_LIMIT_EXCEEDED);
             var price=sku.path("price");
             if(!price.isIntegralNumber() || !price.canConvertToLong() || price.longValue()<0 || price.longValue()>1_000_000_000_000L)
-                throw error(ErrorCode.DEPENDENCY_UNAVAILABLE);
+                throw error(CommonErrorCode.DEPENDENCY_UNAVAILABLE);
             Map<String,String> options=new TreeMap<>();
-            if(!sku.path("options").isObject()) throw error(ErrorCode.DEPENDENCY_UNAVAILABLE);
+            if(!sku.path("options").isObject()) throw error(CommonErrorCode.DEPENDENCY_UNAVAILABLE);
             sku.path("options").fields().forEachRemaining(entry->options.put(entry.getKey(),entry.getValue().asText()));
             lines.add(new Line(item.productId(),item.skuId(),product.path("name").asText(),product.path("brand").path("name").asText(),
                     Map.copyOf(options),price.longValue(),item.quantity(),Math.multiplyExact(price.longValue(),item.quantity())));
@@ -76,15 +78,15 @@ public final class OrderService {
     }
 
     public Accepted create(UUID user, String key, CreateRequest request) {
-        if(key==null || !key.matches("[A-Za-z0-9._:-]{1,128}")) throw error(ErrorCode.INVALID_INPUT);
+        if(key==null || !key.matches("[A-Za-z0-9._:-]{1,128}")) throw error(CommonErrorCode.INVALID_INPUT);
         String bodyHash=hash(json(request));
         Accepted previous=receipt(user,key,bodyHash,false);
         if(previous!=null) return previous;
-        if(!request.agreed() || !termsVersion.equals(request.purchaseTermsVersion())) throw error(ErrorCode.CONSENT_REQUIRED);
+        if(!request.agreed() || !termsVersion.equals(request.purchaseTermsVersion())) throw error(OrderErrorCode.CONSENT_REQUIRED);
         Quote quote=loadQuote(user,request.quoteId(),false);
-        if(!quote.expiresAt().isAfter(now())) throw error(ErrorCode.QUOTE_EXPIRED);
+        if(!quote.expiresAt().isAfter(now())) throw error(OrderErrorCode.QUOTE_EXPIRED);
         List<Line> refreshed=prices(quote.items().stream().map(l->new Item(l.productId(),l.skuId(),l.quantity())).toList());
-        for(int i=0;i<refreshed.size();i++) if(refreshed.get(i).unitPrice()!=quote.items().get(i).unitPrice()) throw error(ErrorCode.PRICE_CHANGED);
+        for(int i=0;i<refreshed.size();i++) if(refreshed.get(i).unitPrice()!=quote.items().get(i).unitPrice()) throw error(OrderErrorCode.PRICE_CHANGED);
         return tx.execute(status->{
             jdbc.update("INSERT INTO order_idempotency(user_id,request_key,body_hash) VALUES(?,?,?) ON DUPLICATE KEY UPDATE request_key=request_key",
                     user.toString(),key,bodyHash);
@@ -92,9 +94,9 @@ public final class OrderService {
             if(replay!=null) return replay;
             Quote locked=loadQuote(user,request.quoteId(),true);
             Instant now=now();
-            if(!locked.expiresAt().isAfter(now)) throw error(ErrorCode.QUOTE_EXPIRED);
+            if(!locked.expiresAt().isAfter(now)) throw error(OrderErrorCode.QUOTE_EXPIRED);
             if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM customer_order WHERE quote_id=?)",Boolean.class,locked.quoteId().toString())))
-                throw error(ErrorCode.QUOTE_ALREADY_USED);
+                throw error(OrderErrorCode.QUOTE_ALREADY_USED);
             UUID id=UUID.randomUUID(), reservation=UUID.randomUUID(), reserve=UUID.randomUUID(), release=UUID.randomUUID();
             Instant deadline=now.plusSeconds(30);
             jdbc.update("""
@@ -111,18 +113,18 @@ public final class OrderService {
     }
     private Accepted receipt(UUID user,String key,String expected,boolean lock) {
         return jdbc.query("SELECT body_hash,result FROM order_idempotency WHERE user_id=? AND request_key=?"+(lock?" FOR UPDATE":""),(rs,n)->{
-            if(!expected.equals(rs.getString(1))) throw error(ErrorCode.IDEMPOTENCY_CONFLICT);
+            if(!expected.equals(rs.getString(1))) throw error(OrderErrorCode.IDEMPOTENCY_CONFLICT);
             return rs.getString(2)==null?null:read(rs.getString(2),Accepted.class);
         },user.toString(),key).stream().filter(Objects::nonNull).findFirst().orElse(null);
     }
     private Quote loadQuote(UUID user,UUID id,boolean lock) {
         return jdbc.query("SELECT * FROM checkout_quote WHERE id=? AND user_id=?"+(lock?" FOR UPDATE":""),(rs,n)->new Quote(id,lines(rs.getString("items")),
                 rs.getLong("total_amount"),"KRW",rs.getTimestamp("expires_at").toInstant()),id.toString(),user.toString())
-                .stream().findFirst().orElseThrow(()->error(ErrorCode.NOT_FOUND));
+                .stream().findFirst().orElseThrow(()->error(CommonErrorCode.NOT_FOUND));
     }
     public View get(UUID user,UUID id) { return view(owned(user,id,false)); }
     public Page list(UUID user,int page,int size) {
-        if(page<1 || page>100000 || size<1 || size>100) throw error(ErrorCode.INVALID_INPUT);
+        if(page<1 || page>100000 || size<1 || size>100) throw error(CommonErrorCode.INVALID_INPUT);
         List<Summary> items=jdbc.query("SELECT id,status,total_amount,created_at FROM customer_order WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
                 (r,n)->new Summary(UUID.fromString(r.getString(1)),r.getString(2),r.getLong(3),"KRW",r.getTimestamp(4).toInstant()),user.toString(),size,(page-1)*size);
         long count=jdbc.queryForObject("SELECT COUNT(*) FROM customer_order WHERE user_id=?",Long.class,user.toString());
@@ -132,7 +134,7 @@ public final class OrderService {
         return tx.execute(status->{
             Row row=owned(user,id,true);
             if(Set.of("CANCELED","EXPIRED","REJECTED","ABORTING").contains(row.state)) return view(row);
-            if(!Set.of("PREPARING","PENDING_PAYMENT").contains(row.state)) throw error(ErrorCode.ORDER_STATE_CONFLICT);
+            if(!Set.of("PREPARING","PENDING_PAYMENT").contains(row.state)) throw error(OrderErrorCode.ORDER_STATE_CONFLICT);
             abort(row,"CANCELED","USER_CANCELED");
             return view(row(id,true));
         });
@@ -205,7 +207,7 @@ public final class OrderService {
     }
     private Row owned(UUID user,UUID id,boolean lock) {
         Row row=row(id,lock);
-        if(row==null || !row.user.equals(user)) throw error(ErrorCode.NOT_FOUND);
+        if(row==null || !row.user.equals(user)) throw error(CommonErrorCode.NOT_FOUND);
         return row;
     }
     private record Row(UUID id,UUID user,String state,String reason,String target,UUID reservation,UUID reserve,UUID release,
@@ -236,5 +238,5 @@ public final class OrderService {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch(Exception ex) { throw new IllegalStateException("Digest unavailable"); }
     }
-    private static ApiException error(ErrorCode code) { return new ApiException(code); }
+    private static BusinessException error(ErrorCode code) { return new BusinessException(code); }
 }
