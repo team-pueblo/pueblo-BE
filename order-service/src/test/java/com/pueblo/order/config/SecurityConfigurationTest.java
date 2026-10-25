@@ -19,6 +19,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SecurityConfigurationTest {
     @Autowired
     MockMvc mvc;
+    @Test void internalPaymentContractIsClosedWhenFeatureIsDisabled() throws Exception {
+        mvc.perform(get("/internal/v1/orders/00000000-0000-0000-0000-000000000001/payment-attempts"))
+                .andExpect(status().isUnauthorized());
+    }
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     com.pueblo.order.checkout.ServiceClients clients;
 

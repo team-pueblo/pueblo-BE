@@ -134,6 +134,7 @@ public final class OrderService {
         return tx.execute(status->{
             Row row=owned(user,id,true);
             if(Set.of("CANCELED","EXPIRED","REJECTED","ABORTING").contains(row.state)) return view(row);
+            if(row.state.equals("PAYMENT_PROCESSING")) throw error(OrderErrorCode.PAYMENT_ALREADY_STARTED);
             if(!Set.of("PREPARING","PENDING_PAYMENT").contains(row.state)) throw error(OrderErrorCode.ORDER_STATE_CONFLICT);
             abort(row,"CANCELED","USER_CANCELED");
             return view(row(id,true));
@@ -142,12 +143,16 @@ public final class OrderService {
     public int expireBatch() {
         List<String> ids=jdbc.queryForList("""
                 SELECT id FROM customer_order WHERE (status='PREPARING' AND prepare_deadline<=UTC_TIMESTAMP(6))
-                OR (status='PENDING_PAYMENT' AND expires_at<=UTC_TIMESTAMP(6)) ORDER BY created_at,id LIMIT 100
+                OR (status IN ('PENDING_PAYMENT','PAYMENT_PROCESSING') AND expires_at<=UTC_TIMESTAMP(6)) ORDER BY created_at,id LIMIT 100
                 """,String.class);
         for(String id:ids) tx.executeWithoutResult(status->{
             Row row=row(UUID.fromString(id),true); Instant now=now();
             if(row.state.equals("PREPARING") && !row.deadline.isAfter(now)) abort(row,"REJECTED","RESERVATION_TIMEOUT");
             else if(row.state.equals("PENDING_PAYMENT") && !row.expires.isAfter(now)) abort(row,"EXPIRED","RESERVATION_EXPIRED");
+            else if(row.state.equals("PAYMENT_PROCESSING") && !row.expires.isAfter(now)) {
+                state(row,"RECONCILIATION_REQUIRED","PAYMENT_STATUS_UNKNOWN");
+                release(row); // Reservation expiry is not evidence that the PG charge failed.
+            }
         });
         return ids.size();
     }
@@ -171,6 +176,7 @@ public final class OrderService {
                 if(row.state.equals("ABORTING")) state(row,row.target,row.reason);
                 else if(row.state.equals("PREPARING")) state(row,"REJECTED",result.reason()==null?result.state():result.reason());
                 else if(row.state.equals("PENDING_PAYMENT")) state(row,result.state().equals("EXPIRED")?"EXPIRED":"RECONCILIATION_REQUIRED",result.state());
+                else if(row.state.equals("PAYMENT_PROCESSING")) state(row,"RECONCILIATION_REQUIRED","PAYMENT_STATUS_UNKNOWN");
                 return;
             }
             if(result.state().equals("RESERVED")) {
@@ -182,7 +188,7 @@ public final class OrderService {
                             Timestamp.from(result.reservedAt()),Timestamp.from(result.expiresAt()),row.id.toString());
                 } else if(row.state.equals("PREPARING")) abort(row,"REJECTED","RESERVATION_TIMEOUT");
                 else if(row.state.equals("ABORTING")) release(row);
-                else if(!row.state.equals("PENDING_PAYMENT")) state(row,"RECONCILIATION_REQUIRED","UNEXPECTED_ACTIVE_RESERVATION");
+                else if(!Set.of("PENDING_PAYMENT","PAYMENT_PROCESSING").contains(row.state)) state(row,"RECONCILIATION_REQUIRED","UNEXPECTED_ACTIVE_RESERVATION");
                 return;
             }
             state(row,"RECONCILIATION_REQUIRED","UNEXPECTED_INVENTORY_STATE");

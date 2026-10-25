@@ -11,7 +11,11 @@ public enum OrderErrorCode implements ErrorCode {
     QUOTE_ALREADY_USED(409),
     PRODUCT_UNAVAILABLE(409),
     QUANTITY_LIMIT_EXCEEDED(409),
-    ORDER_STATE_CONFLICT(409);
+    ORDER_STATE_CONFLICT(409),
+    PAYMENT_AMOUNT_MISMATCH(409),
+    PAYMENT_ALREADY_STARTED(409),
+    PAYMENT_NOT_READY(409),
+    PAYMENT_WINDOW_EXPIRED(409);
     private final HttpStatus status;
     OrderErrorCode(int status) { this.status=HttpStatus.valueOf(status); }
     @Override public HttpStatus status() { return status; }

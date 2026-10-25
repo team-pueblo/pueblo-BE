@@ -62,6 +62,9 @@ management:
 pueblo:
   orders:
     enabled: ${ORDER_FLOW_ENABLED:false}
+    payment-preparation:
+      enabled: ${ORDER_PAYMENT_PREPARATION_ENABLED:false}
+      service-token: ${ORDER_PAYMENT_SERVICE_TOKEN:}
     member-url: ${ORDER_MEMBER_URL:http://localhost:8081}
     catalog-url: ${ORDER_CATALOG_URL:http://localhost:8082}
     inventory-secret: ${INVENTORY_COMMAND_SECRET:}
