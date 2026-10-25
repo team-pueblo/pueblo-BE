@@ -1,5 +1,7 @@
 # pueblo-BE
 
+
+[주문 결제 시도 접수](docs/order-payment-preparation.md): 내부 API·인증·상태 전이·검증. 실제 PG 승인 연동은 후속 단계입니다.
 Java 21 / Spring Boot 기반 MSA e-Commerce입니다. 회원·상품/재고·주문·결제 서비스를 Gradle 멀티모듈로 관리합니다.
 
 ## 로컬 실행

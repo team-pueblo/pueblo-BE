@@ -35,6 +35,7 @@ class OrderFlowIntegrationTest {
             .withUrlParam("connectionTimeZone","UTC").withUrlParam("forceConnectionTimeZoneToSession","true");
     @Container static final KafkaContainer KAFKA=new KafkaContainer("apache/kafka:4.1.2");
     static final String SECRET="order-integration-only-key-32-bytes";
+    static final String PAYMENT_TOKEN="payment-service-integration-only-credential";
     static final UUID USER=UUID.randomUUID(), OTHER=UUID.randomUUID();
     static ConfigurableApplicationContext catalog, order;
     static JdbcTemplate catalogDb, orderDb;
@@ -81,6 +82,7 @@ class OrderFlowIntegrationTest {
                 "--spring.flyway.locations=filesystem:"+root+"/"+service+"-service/src/main/resources/db/migration",
                 "--spring.kafka.bootstrap-servers="+KAFKA.getBootstrapServers(),"--pueblo.messaging.polling-enabled=false",
                 "--pueblo.orders.enabled="+service.equals("order"),"--pueblo.orders.inventory-secret="+SECRET,
+                "--pueblo.orders.payment-preparation.enabled="+service.equals("order"),"--pueblo.orders.payment-preparation.service-token="+PAYMENT_TOKEN,
                 "--pueblo.orders.member-url=http://127.0.0.1:"+memberPort,"--pueblo.orders.catalog-url=http://127.0.0.1:"+catalogPort,
                 "--pueblo.orders.timeout-poll-ms=3600000","--pueblo.inventory.enabled="+service.equals("catalog"),
                 "--pueblo.inventory.listener-enabled="+service.equals("catalog"),"--pueblo.inventory.expiry-enabled=false",
@@ -244,5 +246,126 @@ class OrderFlowIntegrationTest {
         assertThat(accepted.path("totalAmount").asLong()).isEqualTo(catalogDb.queryForObject(
                 "SELECT COALESCE(s.price_override,p.sale_price) FROM catalog_sku s JOIN catalog_product p ON p.id=s.product_id WHERE s.id=?",Long.class,sku.toString()));
         settle(UUID.fromString(accepted.path("orderId").asText()),"PENDING_PAYMENT");
+    }
+
+    HttpResponse<String> payment(String method,UUID id,Object body,String user,String secret) throws Exception {
+        var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+orderPort+"/internal/v1/orders/"+id+"/payment-attempts"))
+                .timeout(Duration.ofSeconds(15)).header("Content-Type","application/json");
+        if(user!=null) builder.header("Authorization","Bearer "+user);
+        if(secret!=null) builder.header("X-Payment-Service-Token",secret);
+        return HTTP.send(builder.method(method,body==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body))).build(),HttpResponse.BodyHandlers.ofString());
+    }
+    UUID readyOrder() throws Exception { UUID id=create(quote(),UUID.randomUUID().toString()); settle(id,"PENDING_PAYMENT"); return id; }
+    Map<String,Object> paymentBody(UUID id,UUID paymentId) {
+        return Map.of("paymentId",paymentId,"amount",orderDb.queryForObject("SELECT total_amount FROM customer_order WHERE id=?",Long.class,id.toString()),"currency","KRW");
+    }
+    void expirePayment(UUID id) {
+        orderDb.update("UPDATE customer_order SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE id=?",id.toString());
+        order.getBean(OrderService.class).expireBatch();
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(()->{
+            dispatch(order); dispatch(catalog);
+            assertThat(state(id)).isEqualTo("RECONCILIATION_REQUIRED");
+            assertThat(catalogDb.queryForObject("SELECT status FROM inventory_reservation WHERE order_id=?",String.class,id.toString())).isEqualTo("RELEASED");
+        });
+    }
+    @Test @Order(13) void paymentRequiresMachineCredentialAndOwnerButRecoveryNeedsNoUserToken() throws Exception {
+        UUID id=readyOrder(); var body=paymentBody(id,UUID.randomUUID());
+        assertThat(payment("POST",id,body,"fixture-user",null).statusCode()).isEqualTo(401);
+        assertThat(payment("POST",id,body,"fixture-user","incorrect").statusCode()).isEqualTo(401);
+        assertThat(payment("POST",id,body,null,PAYMENT_TOKEN).statusCode()).isEqualTo(401);
+        assertThat(payment("POST",id,body,"fixture-other",PAYMENT_TOKEN).statusCode()).isEqualTo(404);
+        var first=data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200);
+        assertThat(first.path("orderStatus").asText()).isEqualTo("PAYMENT_PROCESSING");
+        assertThat(first.path("nextAction").asText()).isEqualTo("CONTINUE_SAME_ATTEMPT");
+        assertThat(data(payment("GET",id,null,null,PAYMENT_TOKEN),200)).isEqualTo(first);
+        assertThat(payment("GET",id,null,"fixture-user",null).statusCode()).isEqualTo(401);
+        var browser=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+orderPort+"/internal/v1/orders/"+id+"/payment-attempts"))
+                .header("X-Payment-Service-Token",PAYMENT_TOKEN).header("Origin","https://example.com").GET().build();
+        assertThat(HTTP.send(browser,HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
+        expirePayment(id); assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(14) void paymentValidatesAmountStateDeadlineAndRequiredFields() throws Exception {
+        UUID id=create(quote(),UUID.randomUUID().toString()); var body=paymentBody(id,UUID.randomUUID());
+        assertThat(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN).body()).contains("PAYMENT_NOT_READY");
+        settle(id,"PENDING_PAYMENT");
+        var wrong=new HashMap<>(body); wrong.put("amount",1);
+        assertThat(payment("POST",id,wrong,"fixture-user",PAYMENT_TOKEN).body()).contains("PAYMENT_AMOUNT_MISMATCH");
+        wrong=new HashMap<>(body); wrong.put("currency","USD");
+        assertThat(payment("POST",id,wrong,"fixture-user",PAYMENT_TOKEN).statusCode()).isEqualTo(409);
+        wrong=new HashMap<>(body); wrong.remove("amount");
+        assertThat(payment("POST",id,wrong,"fixture-user",PAYMENT_TOKEN).statusCode()).isEqualTo(400);
+        orderDb.update("UPDATE customer_order SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE id=?",id.toString());
+        assertThat(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN).body()).contains("PAYMENT_WINDOW_EXPIRED");
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM order_payment_attempt WHERE order_id=?",Integer.class,id.toString())).isZero();
+        order.getBean(OrderService.class).expireBatch(); settle(id,"EXPIRED");
+    }
+    @Test @Order(15) void paymentReplayPreservesIdentityDeadlineAndGlobalUniqueness() throws Exception {
+        UUID id=readyOrder(),paymentId=UUID.randomUUID(); var body=paymentBody(id,paymentId);
+        var first=data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200);
+        assertThat(data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200)).isEqualTo(first);
+        assertThat(payment("POST",id,paymentBody(id,UUID.randomUUID()),"fixture-user",PAYMENT_TOKEN).body()).contains("PAYMENT_ALREADY_STARTED");
+        assertThat(request("POST","/api/v1/me/orders/"+id+"/cancellations",null,"fixture-user",null).statusCode()).isEqualTo(409);
+        UUID second=readyOrder();
+        assertThat(payment("POST",second,paymentBody(second,paymentId),"fixture-user",PAYMENT_TOKEN).statusCode()).isEqualTo(409);
+        assertThat(state(second)).isEqualTo("PENDING_PAYMENT");
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM order_payment_attempt WHERE payment_id=?",Integer.class,paymentId.toString())).isEqualTo(1);
+        data(request("POST","/api/v1/me/orders/"+second+"/cancellations",null,"fixture-user",null),202); settle(second,"CANCELED");
+        expirePayment(id); assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(16) void cancellationAndPaymentClaimHaveOnlyOneWinner() throws Exception {
+        UUID id=readyOrder(); var body=paymentBody(id,UUID.randomUUID());
+        var start=new java.util.concurrent.CountDownLatch(1);
+        try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var claim=pool.submit(()->{start.await();return payment("POST",id,body,"fixture-user",PAYMENT_TOKEN);});
+            var cancel=pool.submit(()->{start.await();return request("POST","/api/v1/me/orders/"+id+"/cancellations",null,"fixture-user",null);});
+            start.countDown(); int a=claim.get(20,TimeUnit.SECONDS).statusCode(),b=cancel.get(20,TimeUnit.SECONDS).statusCode();
+            if(a==200) { assertThat(b).isEqualTo(409); assertThat(state(id)).isEqualTo("PAYMENT_PROCESSING"); expirePayment(id); }
+            else { assertThat(a).isEqualTo(409); assertThat(b).isEqualTo(202); settle(id,"CANCELED"); }
+        }
+        assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(17) void concurrentClaimsSerializeAndReplayWithoutCreatingAnotherAttempt() throws Exception {
+        for(boolean same:List.of(true,false)) {
+            UUID id=readyOrder(),paymentId=UUID.randomUUID(); var start=new java.util.concurrent.CountDownLatch(1);
+            try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+                var a=pool.submit(()->{start.await();return payment("POST",id,paymentBody(id,paymentId),"fixture-user",PAYMENT_TOKEN);});
+                var b=pool.submit(()->{start.await();return payment("POST",id,paymentBody(id,same?paymentId:UUID.randomUUID()),"fixture-user",PAYMENT_TOKEN);});
+                start.countDown(); var statuses=List.of(a.get(20,TimeUnit.SECONDS).statusCode(),b.get(20,TimeUnit.SECONDS).statusCode());
+                assertThat(statuses).containsExactlyInAnyOrder(200,same?200:409);
+            }
+            assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM order_payment_attempt WHERE order_id=?",Integer.class,id.toString())).isEqualTo(1);
+            expirePayment(id);
+        }
+        assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(18) void expiryPreservesUnknownPaymentAndReplayCannotRenewAuthorization() throws Exception {
+        UUID id=readyOrder(); var body=paymentBody(id,UUID.randomUUID());
+        var first=data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200);
+        orderDb.update("UPDATE customer_order SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE id=?",id.toString());
+        assertThat(data(payment("GET",id,null,null,PAYMENT_TOKEN),200).path("nextAction").asText()).isEqualTo("RECONCILE_ONLY");
+        expirePayment(id); order.getBean(OrderService.class).expireBatch();
+        var replay=data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200);
+        assertThat(replay.path("nextAction").asText()).isEqualTo("RECONCILE_ONLY");
+        assertThat(replay.path("expiresAt")).isEqualTo(first.path("expiresAt"));
+        assertThat(replay.path("orderStatus").asText()).isEqualTo("RECONCILIATION_REQUIRED");
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE aggregate_id=?",Integer.class,id.toString())).isEqualTo(2);
+        assertThat(request("POST","/api/v1/me/orders/"+id+"/cancellations",null,"fixture-user",null).statusCode()).isEqualTo(409);
+        assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(19) void catalogExpiryDuringPaymentDoesNotDeclarePaymentFailure() throws Exception {
+        UUID id=readyOrder(); data(payment("POST",id,paymentBody(id,UUID.randomUUID()),"fixture-user",PAYMENT_TOKEN),200);
+        catalogDb.update("UPDATE inventory_reservation SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE order_id=?",id.toString());
+        catalog.getBean(com.pueblo.catalog.inventory.InventoryService.class).expireBatch();
+        settle(id,"RECONCILIATION_REQUIRED");
+        assertThat(stock()).isEqualTo(10);
+        assertThat(data(payment("GET",id,null,null,PAYMENT_TOKEN),200).path("nextAction").asText()).isEqualTo("RECONCILE_ONLY");
+    }
+    @Test @Order(20) void paymentAttemptSurvivesOrderServiceRestart() throws Exception {
+        UUID id=readyOrder(); var body=paymentBody(id,UUID.randomUUID());
+        var first=data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200);
+        order.close(); order=app("order",OrderApplication.class,catalogPort); orderPort=port(order); orderDb=order.getBean(JdbcTemplate.class);
+        assertThat(data(payment("GET",id,null,null,PAYMENT_TOKEN),200)).isEqualTo(first);
+        assertThat(data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200)).isEqualTo(first);
+        expirePayment(id); assertThat(stock()).isEqualTo(10);
     }
 }

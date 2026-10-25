@@ -1,5 +1,7 @@
 # Swagger UI
 
+
+[주문 결제 시도 접수](order-payment-preparation.md)는 서비스 전용 내부 API로 Swagger에서 숨긴다. 호출 계약·인증·환경변수는 해당 문서를 따른다.
 로컬 컨테이너에서 서비스별 Swagger UI와 OpenAPI JSON을 제공한다.
 
 | 서비스 | Swagger UI | OpenAPI JSON |
