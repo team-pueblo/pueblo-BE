@@ -43,8 +43,8 @@ public class MessagingAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(EventPublisher.class)
     EventPublisher kafkaEventPublisher(KafkaTemplate<Object, Object> kafka, ObjectMapper mapper,
-            MessagingProperties properties) {
-        return new KafkaEventPublisher(kafka, mapper, properties.sendTimeoutMs());
+            MessagingProperties properties, java.util.List<KafkaRecordCustomizer> customizers) {
+        return new KafkaEventPublisher(kafka, mapper, properties.sendTimeoutMs(), customizers);
     }
 
     @Bean

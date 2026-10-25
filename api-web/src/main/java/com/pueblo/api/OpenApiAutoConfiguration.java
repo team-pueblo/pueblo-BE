@@ -39,7 +39,9 @@ public class OpenApiAutoConfiguration {
                   + "이메일 인증을 통한 가입에는 .env의 SMTP 설정이 필요합니다."
                 : service.equals("catalog-service")
                   ? "공개 상품·브랜드·카테고리 조회 API입니다. 가격은 KRW 정수이며 구매 시 재고를 다시 검사해야 합니다."
-                  : "업무 API 구현 전입니다. 구현된 /api/v1 경로만 문서화하며 현재 목록이 비어 있는 것은 정상입니다.";
+                  : service.equals("order-service")
+                    ? "주문 기능 활성화 시 견적·주문 접수·본인 주문 조회·미결제 취소 API를 제공합니다. bearerAuth에 회원 accessToken을 입력하세요. 주문 생성에는 Idempotency-Key가 필요하며 재고 확보 결과는 주문 조회에서 확인합니다. 실제 결제 승인은 아직 연결하지 않았습니다."
+                    : "업무 API 구현 전입니다. 구현된 /api/v1 경로만 문서화하며 현재 목록이 비어 있는 것은 정상입니다.";
         return new OpenAPI().info(new Info().title("pueblo · "+service).version("v1").description(description))
                 .servers(List.of(new Server().url("/")))
                 .components(new Components()

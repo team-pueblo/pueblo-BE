@@ -10,7 +10,7 @@
 
 액세스 JWT는 15분에서 **5분**으로 줄였다. HS256 비밀키 서명, issuer, 정확한 audience, typ=JWT, exp·iat, 최대 수명, UUID sub/jti/sid, token_use, role을 검증한다. 허용 미래 발급 시각은 5초이고 만료 유예는 없다. refresh는 access로 사용할 수 없다. `/me`는 DB 세션 상태와 Redis 키 TTL까지 확인한다. Redis 장애는 503 `AUTH_STORE_UNAVAILABLE`, 키 유실·만료는 401이며 정상 인증으로 우회하지 않는다.
 
-Istio mTLS는 서비스 통신 신원을 검증한다. 사용자 JWT·세션 검증을 대체하지 않는다. 다른 서비스의 사용자 세션 확인 계약은 추후 업무 API와 연결한다.
+Istio mTLS는 서비스 통신 신원을 검증한다. 사용자 JWT·세션 검증을 대체하지 않는다. 주문 서비스는 회원 `/api/v1/me`에 액세스 JWT를 전달해 세션 상태까지 확인한다. 결제 서비스 인증 연결은 후속 범위다.
 
 ## Redis 원자 교체·namespace·TTL
 

@@ -205,6 +205,12 @@ services:
     environment:
       SERVER_PORT: "8080"
       PUEBLO_DOCS_ENABLED: "true"
+      ORDER_FLOW_ENABLED: "${ORDER_FLOW_ENABLED:-false}"
+      ORDER_MEMBER_URL: http://member-service:8080
+      ORDER_CATALOG_URL: http://catalog-service:8080
+      INVENTORY_COMMAND_SECRET: "${INVENTORY_COMMAND_SECRET:-}"
+      ORDER_TERMS_VERSION: "${ORDER_TERMS_VERSION:-purchase-v1}"
+      AUTH_ALLOWED_ORIGINS: "${AUTH_ALLOWED_ORIGINS:-http://localhost:5173}"
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError"
       DB_URL: "jdbc:mysql://mysql:3306/pueblo_order?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
       DB_USERNAME: pueblo_order

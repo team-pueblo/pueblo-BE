@@ -52,7 +52,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Tests and artifacts
-        run: ./gradlew build :member-service:integrationTest :catalog-service:integrationTest --no-daemon
+        run: ./gradlew build :member-service:integrationTest :catalog-service:integrationTest :order-service:integrationTest --no-daemon
       - name: Dependency scan of packaged runtime JARs
         run: >-
           docker run --rm --cap-drop ALL --security-opt no-new-privileges

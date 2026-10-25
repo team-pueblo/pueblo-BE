@@ -8,7 +8,7 @@
 - [Gradle 8.14.3 릴리스](https://docs.gradle.org/8.14.3/release-notes.html)
 - [Kafka 4.1 공식 Docker 안내](https://kafka.apache.org/41/getting-started/docker/)
 
-서비스 시작점·DB/Kafka 설정·Outbox 발행·소비 중복 방지, 회원 인증 API, 상품 공개 조회·SKU, 재고 상태 전이·내부 Kafka 수신을 구현했다. 주문·결제 업무 API와 전체 흐름 연결·대사 작업은 후속 단계다. [회원 인증 설정](member-auth.md), [카탈로그 데이터 준비](catalog.md), [재고 활성화 설정](inventory.md), [메시징 구현 문서](messaging.md)를 참고한다.
+서비스 시작점·DB/Kafka 설정·Outbox 발행·소비 중복 방지, 회원 인증 API, 상품 공개 조회·SKU, 재고 상태 전이·내부 Kafka 수신을 구현했다. [견적·주문·재고 예약 연동·미결제 취소](orders.md)도 구현했다. 실제 결제와 대사는 후속 단계다. [회원 인증 설정](member-auth.md), [카탈로그 데이터 준비](catalog.md), [재고 활성화 설정](inventory.md), [메시징 구현 문서](messaging.md)를 참고한다.
 
 ## 컨테이너 실행 — 기본
 
@@ -50,9 +50,9 @@ docker compose up -d --wait mysql redis kafka
 | 주문 | 8083 | `pueblo_order` |
 | 결제 | 8084 | `pueblo_payment` |
 
-Flyway는 서비스별 `src/main/resources/db/migration`을 해당 계정으로 적용한다. `outbox_event`와 `consumed_event`는 각 DB에 별도로 생성된다. 서비스 간 Gradle 프로젝트 의존성과 교차 DB 권한은 없다. JDBC 시간대와 로컬 MySQL 서버 시간대는 UTC로 설정했다.
+Flyway는 서비스별 `src/main/resources/db/migration`을 해당 계정으로 적용한다. `outbox_event`와 `consumed_event`는 각 DB에 별도로 생성된다. 운영 코드에는 서비스 간 Gradle 프로젝트 의존성과 교차 DB 권한이 없다. 주문 통합 테스트만 별도 카탈로그 앱을 함께 구동한다. JDBC 시간대와 로컬 MySQL 서버 시간대는 UTC로 설정했다.
 
-`local` 프로필 없이 실행하면 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS`를 반드시 제공한다. 회원 서비스에는 JWT·메일 암호화 키와 SMTP 설정도 필요하다. `SERVER_PORT`는 선택 사항이다. Kafka TLS·인증, 서비스 간 사용자 인증 연결, 백업·복구, 실제 Kubernetes 배치는 후속 범위다.
+`local` 프로필 없이 실행하면 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS`를 반드시 제공한다. 회원 서비스에는 JWT·메일 암호화 키와 SMTP 설정도 필요하다. `SERVER_PORT`는 선택 사항이다. 주문 사용자 인증은 회원 API로 연결했다. Kafka TLS/SASL/ACL, 백업·복구, 실제 Kubernetes 배치는 후속 범위다.
 
 ## 상태·보안 확인
 
@@ -66,13 +66,13 @@ Flyway는 서비스별 `src/main/resources/db/migration`을 해당 계정으로 
 ./scripts/verify-bootstrap.sh
 ```
 
-`smoke-local.sh`는 4개 서비스의 readiness 성공과 미인증 보호 경로의 `401`을 확인한다. 회원 서비스는 명시된 인증 API만 공개하고 /me에 JWT·세션 검사를 적용한다. 다른 서비스는 health 외 경로를 차단한다. 기본 비밀번호 발급·폼 로그인·HTTP Basic은 구성하지 않는다.
+`smoke-local.sh`는 4개 서비스의 readiness 성공과 미인증 보호 경로의 `401`을 확인한다. 회원 서비스는 명시된 인증 API만 공개하고 /me에 JWT·세션 검사를 적용한다. 카탈로그는 공개 조회 경로를 제공하고 주문은 활성화 시 회원 API 기반 인증을 적용한다. 결제 서비스 업무 경로는 차단한다. 기본 비밀번호 발급·폼 로그인·HTTP Basic은 구성하지 않는다.
 
 - `/actuator/health/liveness`: 프로세스 생존 상태
 - `/actuator/health/readiness`: 애플리케이션과 DB 연결 상태
 - `/actuator/health`: 기본 health. 상세 정보는 공개하지 않는다.
 
-회원 readiness는 DB와 Redis를 확인하며 다른 서비스는 DB를 확인한다. 현재 readiness는 Kafka 연결·이벤트 소비 지연을 검사하지 않는다. 실제 발행·소비 기능이 생기면 그 기능의 장애 허용 정책에 맞춰 별도 지표·상태를 추가한다. 이번 보안 단위 테스트는 업무 경로 차단을 검사하며 DB·Kafka 검증을 대체하지 않는다.
+회원 readiness는 DB와 Redis를 확인한다. 카탈로그·주문은 DB와 활성화한 재고/결과 리스너 실행 상태도 확인한다. Kafka 연결 자체·소비 지연·Outbox 재시도 소진은 아직 readiness에 포함하지 않는다. 단위 보안 테스트와 실제 MySQL·Kafka 통합 테스트를 구분한다.
 
 ## 데이터 보존과 종료
 
