@@ -8,7 +8,7 @@
 - [Gradle 8.14.3 릴리스](https://docs.gradle.org/8.14.3/release-notes.html)
 - [Kafka 4.1 공식 Docker 안내](https://kafka.apache.org/41/getting-started/docker/)
 
-서비스 시작점·DB/Kafka 설정·Outbox 발행·소비 중복 방지, 회원 인증 API, 상품 공개 조회·SKU 기반을 구현했다. 재고 예약·주문·결제 업무 API와 도메인 이벤트 리스너·대사 작업은 후속 단계다. [회원 인증 설정](member-auth.md), [카탈로그 데이터 준비](catalog.md), [메시징 구현 문서](messaging.md)를 참고한다.
+서비스 시작점·DB/Kafka 설정·Outbox 발행·소비 중복 방지, 회원 인증 API, 상품 공개 조회·SKU, 재고 상태 전이·내부 Kafka 수신을 구현했다. 주문·결제 업무 API와 전체 흐름 연결·대사 작업은 후속 단계다. [회원 인증 설정](member-auth.md), [카탈로그 데이터 준비](catalog.md), [재고 활성화 설정](inventory.md), [메시징 구현 문서](messaging.md)를 참고한다.
 
 ## 컨테이너 실행 — 기본
 

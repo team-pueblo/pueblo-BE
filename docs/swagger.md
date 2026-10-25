@@ -11,6 +11,8 @@
 
 `/swagger-ui.html`도 UI로 이동한다. 회원 서비스는 인증 API 10개, 상품 서비스는 공개 조회 API 5개를 표시한다. 주문·결제 서비스는 업무 API 구현 전이므로 목록이 비어 있다. 상품 계약과 데이터 준비는 [카탈로그 문서](catalog.md)를 참고한다.
 
+재고 변경은 인증된 내부 Kafka 명령으로 처리하며 Swagger용 HTTP 쓰기 API는 제공하지 않는다. [재고 계약](inventory.md)을 참고한다.
+
 ## 회원 API 실행
 
 1. 회원 Swagger는 POST 요청 전에 CSRF 토큰을 자동 조회하고 `X-XSRF-TOKEN` 헤더에 넣는다. 브라우저는 HttpOnly CSRF 쿠키를 함께 전송한다.

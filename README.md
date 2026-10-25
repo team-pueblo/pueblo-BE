@@ -10,7 +10,7 @@ JDK 21과 Docker Compose v2를 준비합니다.
 ./scripts/start-local.sh
 ```
 
-서비스 4개와 MySQL·Redis·Kafka를 Docker Compose로 함께 실행합니다. 포트·DB 계정·나머지 실행 명령은 [로컬 개발 환경](docs/local-development.md)을 참고하세요. 회원 가입·이메일 인증·JWT 갱신·로그아웃·비밀번호 재설정 API를 구현했습니다. 상품·브랜드·카테고리·SKU 조회와 오프라인 데이터 가져오기도 구현했습니다. 주문·결제·재고 예약 API는 후속 단계입니다. Outbox 폴링 발행과 소비 중복 방지 기반은 구현했으며, 도메인별 이벤트 연결은 후속 단계입니다.
+서비스 4개와 MySQL·Redis·Kafka를 Docker Compose로 함께 실행합니다. 포트·DB 계정·나머지 실행 명령은 [로컬 개발 환경](docs/local-development.md)을 참고하세요. 회원 인증, 상품·브랜드·카테고리·SKU 조회, 오프라인 데이터 가져오기를 구현했습니다. 재고 예약·확정·해제·만료·복원과 내부 Kafka 명령·결과 Outbox도 구현했으며 명시적 설정으로 활성화합니다. 주문·결제 업무 API와 전체 구매 흐름 연결은 후속 단계입니다.
 
 ## 설계 문서
 
@@ -30,3 +30,4 @@ JDK 21과 Docker Compose v2를 준비합니다.
 - [백엔드 설계 협의 기록](docs/backend-design.md): 인터뷰 결정 사항, MSA 데이터 소유권, 주문·결제·재고 상태 전이, Kafka 이벤트 계약 초안, 장애 검증 계획과 미정 항목
 
 - [상품 카탈로그 API와 데이터 가져오기](docs/catalog.md)
+- [재고 상태 전이·Kafka 계약·실행 설정](docs/inventory.md)
