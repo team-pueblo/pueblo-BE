@@ -1,0 +1,16 @@
+# Local development only; these credentials are not deployment defaults.
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:13306/pueblo_payment?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: pueblo_payment
+    password: local_payment_only
+  kafka:
+    bootstrap-servers: localhost:9092
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+pueblo:
+  docs:
+    enabled: true

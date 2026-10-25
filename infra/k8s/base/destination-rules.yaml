@@ -1,0 +1,39 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: member-service-mtls
+spec:
+  host: member-service.pueblo.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: catalog-service-mtls
+spec:
+  host: catalog-service.pueblo.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: order-service-mtls
+spec:
+  host: order-service.pueblo.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service-mtls
+spec:
+  host: payment-service.pueblo.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

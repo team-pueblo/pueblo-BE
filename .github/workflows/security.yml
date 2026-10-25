@@ -1,0 +1,93 @@
+name: Security
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: '31 2 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: github/codeql-action/init@793b778da9c9275a0f276522b27cb5fc14bba279 # v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-extended
+      - run: ./gradlew classes --no-daemon
+      - uses: github/codeql-action/analyze@793b778da9c9275a0f276522b27cb5fc14bba279 # v4
+  source-and-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Secret scan
+        run: >-
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges
+          -v "$PWD:/src:ro" "$TRIVY_IMAGE" fs /src --scanners secret
+          --skip-dirs /src/.git --exit-code 1 --no-progress
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Tests and artifacts
+        run: ./gradlew build :member-service:integrationTest :catalog-service:integrationTest --no-daemon
+      - name: Dependency scan of packaged runtime JARs
+        run: >-
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges
+          -v "$PWD:/src:ro" "$TRIVY_IMAGE" rootfs /src --scanners vuln
+          --pkg-types library --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          --skip-dirs /src/.git --skip-dirs /src/.gradle
+  container-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [member-service, catalog-service, order-service, payment-service]
+    env:
+      SERVICE: ${{ matrix.service }}
+      TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: ./gradlew ":${SERVICE}:bootJar" --no-daemon
+      - name: Build and export image without publishing
+        run: |
+          docker build --build-arg SERVICE="$SERVICE" -t "pueblo/${SERVICE}:scan" .
+          docker save "pueblo/${SERVICE}:scan" -o "$RUNNER_TEMP/image.tar"
+          # docker save may create a 0600 archive owned by the runner. With all
+          # capabilities dropped, the scanner cannot bypass that file mode.
+          chmod 0644 "$RUNNER_TEMP/image.tar"
+      - name: Image vulnerabilities and embedded secrets
+        run: >-
+          docker run --rm --cap-drop ALL --security-opt no-new-privileges
+          -v "$RUNNER_TEMP/image.tar:/image.tar:ro" "$TRIVY_IMAGE" image
+          --input /image.tar --scanners vuln,secret --severity HIGH,CRITICAL
+          --exit-code 1 --no-progress

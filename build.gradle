@@ -1,0 +1,67 @@
+plugins {
+    id 'org.springframework.boot' version '3.5.16' apply false
+}
+
+subprojects {
+    apply plugin: 'java'
+    if (!(project.name in ['messaging-jdbc', 'api-web'])) {
+        apply plugin: 'org.springframework.boot'
+    }
+
+    group = 'com.pueblo'
+    version = '0.1.0-SNAPSHOT'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation platform('org.springframework.boot:spring-boot-dependencies:3.5.16')
+        if (project.name != 'messaging-jdbc') {
+            implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
+        }
+        // Same-line security patches verified by packaged-JAR scanning; see docs/security.md.
+        implementation enforcedPlatform('com.fasterxml.jackson:jackson-bom:2.21.7')
+        implementation enforcedPlatform('io.netty:netty-bom:4.1.137.Final')
+        constraints {
+            for (artifact in ['tomcat-embed-core', 'tomcat-embed-el', 'tomcat-embed-websocket']) {
+                implementation("org.apache.tomcat.embed:${artifact}:10.1.61") { because 'Tomcat 10.1 security fixes; 10.1.58 was not published to Maven Central' }
+            }
+            implementation('at.yawk.lz4:lz4-java:1.11.4') { because 'CVE-2026-106451' }
+        }
+        if (!(project.name in ['messaging-jdbc', 'api-web'])) {
+            implementation 'org.springframework.boot:spring-boot-starter-web'
+            implementation 'org.springframework.boot:spring-boot-starter-actuator'
+            implementation 'org.springframework.boot:spring-boot-starter-validation'
+            implementation 'org.springframework.boot:spring-boot-starter-security'
+            implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+            implementation 'org.springframework.kafka:spring-kafka'
+            implementation 'org.flywaydb:flyway-core'
+            runtimeOnly 'org.flywaydb:flyway-mysql'
+            runtimeOnly 'com.mysql:mysql-connector-j'
+            testImplementation 'org.springframework.security:spring-security-test'
+        }
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.compilerArgs += '-parameters'
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        maxHeapSize = '256m'
+    }
+
+    if (!(project.name in ['messaging-jdbc', 'api-web'])) {
+        tasks.named('jar') { enabled = false }
+    }
+}

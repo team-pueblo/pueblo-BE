@@ -1,0 +1,49 @@
+# Gradle / Java generated files (keep Gradle Wrapper in Git)
+.gradle/
+**/build/
+out/
+*.class
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local environment and credentials (keep the placeholder template)
+.env
+.env.*
+!.env.example
+.local/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+/.aws/
+
+# IDE settings
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.metadata/
+
+# Logs / JVM crash reports and heap dumps
+*.log
+logs/
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# OS / editor temporary files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

@@ -1,0 +1,39 @@
+version: 2
+
+# GitHub Dependabot이 새 버전과 보안 업데이트를 확인해 PR을 생성합니다.
+# 업데이트를 자동 병합하거나 배포하지 않으며, 생성된 PR은 검토 후 머지합니다.
+# Jackson databind는 BOM·force 핀과 같이 올라가야 실제로 버전이 바뀝니다.
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      jackson:
+        patterns:
+          - "com.fasterxml.jackson*"
+          - "tools.jackson*"
+      apache-http:
+        patterns:
+          - "org.apache.httpcomponents*"
+      logging:
+        patterns:
+          - "org.apache.logging.log4j*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: docker
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly

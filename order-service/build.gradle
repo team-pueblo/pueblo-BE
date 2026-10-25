@@ -1,0 +1,5 @@
+dependencies {
+    implementation project(':messaging-jdbc')
+}
+
+dependencies { implementation project(':api-web') }

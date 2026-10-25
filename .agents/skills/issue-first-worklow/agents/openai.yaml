@@ -1,0 +1,4 @@
+interface:
+  display_name: "이슈부터 PR까지"
+  short_description: "이슈 템플릿과 TODO부터 브랜치·커밋·푸시·PR 작성까지 진행"
+  default_prompt: "$issue-first-workflow로 요청한 기능을 이슈 작성부터 PR 생성까지 진행하고, 머지는 내가 하도록 남겨줘."

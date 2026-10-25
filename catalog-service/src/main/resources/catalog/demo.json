@@ -1,0 +1,305 @@
+{
+  "brands": [
+    {
+      "slug": "pueblo-lab",
+      "name": "Pueblo Lab",
+      "koreanName": "푸에블로 랩",
+      "logoUrl": "/catalog-assets/demo.svg"
+    },
+    {
+      "slug": "atelier-demo",
+      "name": "Atelier Demo",
+      "koreanName": "아틀리에 데모",
+      "logoUrl": null
+    },
+    {
+      "slug": "empty-brand",
+      "name": "Empty Brand",
+      "koreanName": "",
+      "logoUrl": null
+    }
+  ],
+  "categories": [
+    {
+      "slug": "jacket",
+      "name": "재킷"
+    },
+    {
+      "slug": "tshirt",
+      "name": "티셔츠"
+    },
+    {
+      "slug": "pants",
+      "name": "바지"
+    },
+    {
+      "slug": "shoes",
+      "name": "신발"
+    },
+    {
+      "slug": "hat",
+      "name": "모자"
+    },
+    {
+      "slug": "accessory",
+      "name": "액세서리"
+    }
+  ],
+  "products": [
+    {
+      "source": "DEMO",
+      "externalId": "1",
+      "sourceUrl": null,
+      "brandSlug": "pueblo-lab",
+      "categorySlug": "tshirt",
+      "name": "Demo Cotton T-Shirt",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 39000,
+      "salePrice": 29000,
+      "status": "PUBLISHED",
+      "collections": [
+        "men",
+        "women"
+      ],
+      "skus": [
+        {
+          "externalId": "black-m",
+          "options": {
+            "color": "black",
+            "size": "M"
+          },
+          "priceOverride": null,
+          "stock": 5,
+          "purchaseLimit": 9
+        },
+        {
+          "externalId": "black-l",
+          "options": {
+            "color": "black",
+            "size": "L"
+          },
+          "priceOverride": 30000,
+          "stock": 0,
+          "purchaseLimit": 2
+        }
+      ]
+    },
+    {
+      "source": "DEMO",
+      "externalId": "2",
+      "sourceUrl": null,
+      "brandSlug": "atelier-demo",
+      "categorySlug": "pants",
+      "name": "Demo Denim Pants",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 59000,
+      "salePrice": 59000,
+      "status": "PUBLISHED",
+      "collections": [
+        "men"
+      ],
+      "skus": [
+        {
+          "externalId": "black-m",
+          "options": {
+            "color": "black",
+            "size": "M"
+          },
+          "priceOverride": null,
+          "stock": 0,
+          "purchaseLimit": 9
+        },
+        {
+          "externalId": "black-l",
+          "options": {
+            "color": "black",
+            "size": "L"
+          },
+          "priceOverride": 60000,
+          "stock": 0,
+          "purchaseLimit": 2
+        }
+      ]
+    },
+    {
+      "source": "DEMO",
+      "externalId": "3",
+      "sourceUrl": null,
+      "brandSlug": "pueblo-lab",
+      "categorySlug": "jacket",
+      "name": "Demo Light Jacket",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 99000,
+      "salePrice": 89000,
+      "status": "PUBLISHED",
+      "collections": [
+        "women"
+      ],
+      "skus": [
+        {
+          "externalId": "black-m",
+          "options": {
+            "color": "black",
+            "size": "M"
+          },
+          "priceOverride": null,
+          "stock": 3,
+          "purchaseLimit": 9
+        },
+        {
+          "externalId": "black-l",
+          "options": {
+            "color": "black",
+            "size": "L"
+          },
+          "priceOverride": 90000,
+          "stock": 0,
+          "purchaseLimit": 2
+        }
+      ]
+    },
+    {
+      "source": "DEMO",
+      "externalId": "4",
+      "sourceUrl": null,
+      "brandSlug": "atelier-demo",
+      "categorySlug": "shoes",
+      "name": "Demo Canvas Shoes",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 49000,
+      "salePrice": 49000,
+      "status": "PUBLISHED",
+      "collections": [
+        "men",
+        "women"
+      ],
+      "skus": [
+        {
+          "externalId": "black-m",
+          "options": {
+            "color": "black",
+            "size": "M"
+          },
+          "priceOverride": null,
+          "stock": 4,
+          "purchaseLimit": 9
+        },
+        {
+          "externalId": "black-l",
+          "options": {
+            "color": "black",
+            "size": "L"
+          },
+          "priceOverride": 50000,
+          "stock": 0,
+          "purchaseLimit": 2
+        }
+      ]
+    },
+    {
+      "source": "DEMO",
+      "externalId": "5",
+      "sourceUrl": null,
+      "brandSlug": "pueblo-lab",
+      "categorySlug": "accessory",
+      "name": "Demo Everyday Bag",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 49000,
+      "salePrice": 39000,
+      "status": "PUBLISHED",
+      "collections": [
+        "lifestyle"
+      ],
+      "skus": [
+        {
+          "externalId": "black-m",
+          "options": {
+            "color": "black",
+            "size": "M"
+          },
+          "priceOverride": null,
+          "stock": 2,
+          "purchaseLimit": 9
+        },
+        {
+          "externalId": "black-l",
+          "options": {
+            "color": "black",
+            "size": "L"
+          },
+          "priceOverride": 40000,
+          "stock": 0,
+          "purchaseLimit": 2
+        }
+      ]
+    },
+    {
+      "source": "DEMO",
+      "externalId": "6",
+      "sourceUrl": null,
+      "brandSlug": "atelier-demo",
+      "categorySlug": "hat",
+      "name": "Unreviewed Sample",
+      "description": "Synthetic development sample. Not an actual product for sale.",
+      "images": [
+        "/catalog-assets/demo.svg"
+      ],
+      "policy": {
+        "notice": "Development sample only",
+        "shipping": "Shipping unavailable for sample products",
+        "returns": "Sample data; no actual sales",
+        "as": "Not applicable"
+      },
+      "listPrice": 19000,
+      "salePrice": 19000,
+      "status": "DRAFT",
+      "collections": [],
+      "skus": []
+    }
+  ]
+}

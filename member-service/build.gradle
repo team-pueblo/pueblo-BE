@@ -1,0 +1,34 @@
+dependencies {
+    implementation project(':messaging-jdbc')
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mysql'
+}
+
+sourceSets {
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Runs member authentication HTTP and MySQL integration tests (Docker required).'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    shouldRunAfter tasks.named('test')
+}
+
+dependencies { implementation project(':api-web') }
+
+dependencies { implementation 'org.springframework.boot:spring-boot-starter-data-redis' }

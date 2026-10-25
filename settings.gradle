@@ -1,0 +1,6 @@
+rootProject.name = 'pueblo-be'
+
+include 'member-service', 'catalog-service', 'order-service', 'payment-service'
+include 'messaging-jdbc'
+
+include 'api-web'

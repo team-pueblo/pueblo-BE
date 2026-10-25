@@ -1,0 +1,5 @@
+// HTTP contracts and transport protections only; no domain model or persistence.
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+}

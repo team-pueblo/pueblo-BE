@@ -1,0 +1,18 @@
+# Local development only; these credentials are not deployment defaults.
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:13306/pueblo_catalog?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: pueblo_catalog
+    password: local_catalog_only
+  kafka:
+    bootstrap-servers: localhost:9092
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+pueblo:
+  catalog:
+    allowed-origins: ${CATALOG_ALLOWED_ORIGINS:http://localhost:5173}
+  docs:
+    enabled: true

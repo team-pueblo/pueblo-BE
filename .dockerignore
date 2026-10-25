@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!*-service/
+!*-service/build/
+!*-service/build/libs/
+!*-service/build/libs/*.jar

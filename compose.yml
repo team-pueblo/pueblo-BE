@@ -1,0 +1,260 @@
+# Local container stack; credentials and HTTP settings are development-only.
+name: pueblo-local
+services:
+  mysql:
+    image: mysql:8.4.7
+    environment:
+      MYSQL_ROOT_PASSWORD: local_root_only
+    ports:
+      - "127.0.0.1:13306:3306"
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-time-zone=+00:00", "--innodb-buffer-pool-size=128M", "--max-connections=60"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql -h 127.0.0.1 -u root -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    command: ["redis-server", "--requirepass", "local_redis_only", "--appendonly", "yes", "--appendfsync", "always", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:16379:6379"
+    volumes:
+      - redis-data:/data
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=local_redis_only redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:4.1.2
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+      KAFKA_LOG_SEGMENT_BYTES: 67108864
+      KAFKA_LOG_RETENTION_BYTES: 268435456
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:19092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  auth-keys-init:
+    image: eclipse-temurin:21-jre
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        cp /source/mail.key /keys/
+        chown -R 10001:10001 /keys
+        chmod 700 /keys
+        chmod 400 /keys/mail.key
+    volumes:
+      - type: bind
+        source: ./.local/auth
+        target: /source
+        read_only: true
+        bind:
+          create_host_path: false
+      - auth-runtime-keys:/keys
+
+  member-service:
+    image: pueblo/member-service:local
+    build:
+      context: .
+      args:
+        SERVICE: member-service
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: local
+      PUEBLO_DOCS_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError"
+      DB_URL: "jdbc:mysql://mysql:3306/pueblo_member?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+      DB_USERNAME: pueblo_member
+      DB_PASSWORD: local_member_only
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: local_redis_only
+      REDIS_SSL: "false"
+      AUTH_REDIS_NAMESPACE: pueblo:local:member:security:v1
+      JWT_TOKEN: "${JWT_TOKEN:?Set JWT_TOKEN in .env to a random secret of at least 32 bytes}"
+      AUTH_MAIL_KEY_LOCATION: file:/var/run/pueblo/auth/mail.key
+      PUEBLO_AUTH_COOKIE_SECURE: "false"
+      AUTH_FRONTEND_BASE_URL: "${AUTH_FRONTEND_BASE_URL:-http://localhost:5173}"
+      AUTH_ALLOWED_ORIGINS: "${AUTH_ALLOWED_ORIGINS:-http://localhost:5173}"
+      SMTP_HOST: "${SMTP_HOST:-localhost}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_AUTH: "${SMTP_AUTH:-true}"
+      SMTP_STARTTLS: "${SMTP_STARTTLS:-true}"
+      SMTP_SSL: "${SMTP_SSL:-false}"
+    volumes:
+      - auth-runtime-keys:/var/run/pueblo/auth:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-keys-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  catalog-service:
+    image: pueblo/catalog-service:local
+    build:
+      context: .
+      args:
+        SERVICE: catalog-service
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      CATALOG_ALLOWED_ORIGINS: "${CATALOG_ALLOWED_ORIGINS:-http://localhost:5173}"
+      SERVER_PORT: "8080"
+      PUEBLO_DOCS_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError"
+      DB_URL: "jdbc:mysql://mysql:3306/pueblo_catalog?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+      DB_USERNAME: pueblo_catalog
+      DB_PASSWORD: local_catalog_only
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  order-service:
+    image: pueblo/order-service:local
+    build:
+      context: .
+      args:
+        SERVICE: order-service
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    ports:
+      - "127.0.0.1:8083:8080"
+    environment:
+      SERVER_PORT: "8080"
+      PUEBLO_DOCS_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError"
+      DB_URL: "jdbc:mysql://mysql:3306/pueblo_order?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+      DB_USERNAME: pueblo_order
+      DB_PASSWORD: local_order_only
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  payment-service:
+    image: pueblo/payment-service:local
+    build:
+      context: .
+      args:
+        SERVICE: payment-service
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    ports:
+      - "127.0.0.1:8084:8080"
+    environment:
+      SERVER_PORT: "8080"
+      PUEBLO_DOCS_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:+ExitOnOutOfMemoryError"
+      DB_URL: "jdbc:mysql://mysql:3306/pueblo_payment?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+      DB_USERNAME: pueblo_payment
+      DB_PASSWORD: local_payment_only
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+volumes:
+  auth-runtime-keys:
+  redis-data:
+  mysql-data:
+  kafka-data:
