@@ -1,6 +1,7 @@
 package com.pueblo.order.checkout;
 
-import com.pueblo.api.ApiResponse;
+import com.pueblo.common.response.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.security.Principal;
@@ -8,7 +9,6 @@ import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import static com.pueblo.order.checkout.OrderModels.*;
 
 @RestController

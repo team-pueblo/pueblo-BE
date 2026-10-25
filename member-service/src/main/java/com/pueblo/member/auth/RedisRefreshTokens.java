@@ -1,6 +1,10 @@
 package com.pueblo.member.auth;
 
-import com.pueblo.api.*;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
+import com.pueblo.common.security.redis.SecurityKeyNamespace;
+import com.pueblo.common.security.redis.SecurityKeyPurpose;
+import com.pueblo.common.security.redis.SecurityTtlPolicy;
 import java.time.*;
 import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class RedisRefreshTokens {
     private final StringRedisTemplate redis;
-    private final String namespace;
+    private final SecurityKeyNamespace namespace;
     private final Clock clock;
     private static final DefaultRedisScript<Long> CREATE=new DefaultRedisScript<>("""
         if redis.call('EXISTS',KEYS[1]) == 1 then return 0 end
@@ -37,32 +41,31 @@ public class RedisRefreshTokens {
         return 1
         """,Long.class);
     public RedisRefreshTokens(StringRedisTemplate redis,Clock clock,@Value("${pueblo.auth.redis-namespace}") String namespace) {
-        if(!namespace.matches("pueblo:[a-z0-9-]{1,32}:member:security:v1")) throw new IllegalArgumentException("Environment-specific auth namespace required");
-        this.redis=redis; this.clock=clock; this.namespace=namespace;
+        this.redis=redis; this.clock=clock; this.namespace=new SecurityKeyNamespace(namespace,"member");
     }
-    public String key(String sessionId) { return namespace+":refresh:{"+UUID.fromString(sessionId)+"}"; }
+    public String key(String sessionId) { return namespace.key(SecurityKeyPurpose.REFRESH_SESSION,sessionId); }
     private static String hash(String raw) { return HexFormat.of().formatHex(TokenSecrets.hash(raw)); }
     public void create(String sessionId,String raw,Instant expires) {
         try {
-            Long result=redis.execute(CREATE,List.of(key(sessionId)),hash(raw),Long.toString(expires.toEpochMilli()));
-            if(!Long.valueOf(1).equals(result)) throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE);
-        } catch(org.springframework.dao.DataAccessException ex) { throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE); }
+            Long result=redis.execute(CREATE,List.of(key(sessionId)),hash(raw),Long.toString(SecurityTtlPolicy.refreshExpiryMillis(expires,clock)));
+            if(!Long.valueOf(1).equals(result)) throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE);
+        } catch(org.springframework.dao.DataAccessException ex) { throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE); }
     }
     public long rotate(String sessionId,String oldToken,String newToken) {
         try {
             Long result=redis.execute(ROTATE,List.of(key(sessionId)),hash(oldToken),hash(newToken),Long.toString(clock.millis()));
-            if(result==null) throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE);
+            if(result==null) throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE);
             return result;
-        } catch(org.springframework.dao.DataAccessException ex) { throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE); }
+        } catch(org.springframework.dao.DataAccessException ex) { throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE); }
     }
     public boolean isActive(String sessionId) {
         try {
             Long ttl=redis.getExpire(key(sessionId),java.util.concurrent.TimeUnit.MILLISECONDS);
-            return ttl!=null && ttl>0;
-        } catch(org.springframework.dao.DataAccessException ex) { throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE); }
+            return SecurityTtlPolicy.active(ttl);
+        } catch(org.springframework.dao.DataAccessException ex) { throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE); }
     }
     public void delete(String sessionId) {
         try { redis.delete(key(sessionId)); }
-        catch(org.springframework.dao.DataAccessException ex) { throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE); }
+        catch(org.springframework.dao.DataAccessException ex) { throw new BusinessException(CommonErrorCode.AUTH_STORE_UNAVAILABLE); }
     }
 }

@@ -1,6 +1,8 @@
 package com.pueblo.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pueblo.common.security.ApiAccessDeniedHandler;
+import com.pueblo.common.security.ApiAuthenticationEntryPoint;
 import io.swagger.v3.oas.models.*;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
@@ -25,8 +27,8 @@ public class OpenApiAutoConfiguration {
                 .sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(c->c.disable()).httpBasic(c->c.disable()).logout(c->c.disable())
                 .authorizeHttpRequests(a->a.requestMatchers(org.springframework.http.HttpMethod.GET,"/**").permitAll().anyRequest().denyAll())
-                .exceptionHandling(e->e.authenticationEntryPoint((req,res,ex)->ApiErrors.write(mapper,req,res,ErrorCode.INVALID_CREDENTIALS))
-                        .accessDeniedHandler((req,res,ex)->ApiErrors.write(mapper,req,res,ErrorCode.ACCESS_DENIED)))
+                .exceptionHandling(e->e.authenticationEntryPoint(new ApiAuthenticationEntryPoint(mapper))
+                        .accessDeniedHandler(new ApiAccessDeniedHandler(mapper)))
                 .headers(h->h.frameOptions(f->f.deny()).contentSecurityPolicy(c->c.policyDirectives(
                         "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")))
                 .build();

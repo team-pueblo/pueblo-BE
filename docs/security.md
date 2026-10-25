@@ -30,7 +30,7 @@ Redis 유실·복구로 이전 snapshot을 되살릴 때는 DB 세션을 폐기�
 
 프론트 링크 URL과 CORS origin은 절대 HTTPS, host 존재, 사용자 정보·query·fragment 금지를 검사한다. origin에는 path를 허용하지 않는다. 로컬 Secure=false 설정에서만 localhost/loopback의 HTTP를 허용한다. 이 검증은 구성 URL에 적용된다. 아직 외부 상품 이미지 URL을 받거나 다운로드하는 업무 API는 없다. 서버가 사용자 URL을 fetch하게 되면 DNS/IP·리다이렉트·사설망 접근을 제한하는 별도 SSRF 정책이 필요하다.
 
-`ErrorCode` enum이 HTTP 상태와 기계 판독 코드를 정의한다. 오류 메시지는 `api-web/src/main/resources/messages/errors*.properties`에서 관리한다. `Accept-Language`의 ko/en과 가중치를 지원하고, 미지원·잘못된 헤더·생략은 한국어로 응답한다. `Content-Language`와 `Vary: Accept-Language`를 함께 반환한다. 코드와 응답 구조는 언어에 따라 바뀌지 않는다. 컨트롤러·인증/권한·CSRF·CORS·본문 제한 오류에 동일 체계를 적용한다. 성공 응답의 안내 문구까지 다국어화한 것은 아니다.
+`ErrorCode` 인터페이스를 `CommonErrorCode`와 서비스별 `MemberErrorCode`·`OrderErrorCode`가 구현한다. `BusinessException`, `GlobalExceptionHandler`, 오류 DTO·Factory·Resolver와 보안 핸들러는 [common 구조](common.md)를 따른다. 오류 메시지는 `api-web/src/main/resources/messages/errors*.properties`에서 관리한다. `Accept-Language`의 ko/en과 가중치를 지원하고, 미지원·잘못된 헤더·생략은 한국어로 응답한다. `Content-Language`와 `Vary: Accept-Language`를 함께 반환한다. 기존 코드와 응답 구조를 유지하면서 입력 검증에 선택적인 `error.details`를 추가했다. 컨트롤러·인증/권한·CSRF·CORS·본문 제한 오류에 동일 체계를 적용한다. 성공 응답의 안내 문구까지 다국어화한 것은 아니다.
 
 예: `Accept-Language: en-US,en;q=0.9`로 미인증 `/api/v1/me` 요청 시 `INVALID_CREDENTIALS`, `Check your authentication credentials.`를 반환한다. 비밀번호·토큰·내부 예외 메시지는 응답/로그에 싣지 않는다.
 

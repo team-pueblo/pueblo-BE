@@ -1,5 +1,6 @@
 package com.pueblo.member.auth;
 
+import com.pueblo.common.security.validation.ExternalUrlPolicy;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -19,13 +20,13 @@ public record AuthProperties(
         @DefaultValue("smtp") String mailMode,
         @DefaultValue("noreply@localhost") String mailFrom) {
     public AuthProperties {
-        com.pueblo.api.ExternalUrlPolicy.requireWebUrl(frontendBaseUrl,!cookieSecure,false);
+        ExternalUrlPolicy.requireWebUrl(frontendBaseUrl,!cookieSecure,false);
         allowedOrigins = allowedOrigins == null ? List.of() : List.copyOf(allowedOrigins);
         if (!List.of("Lax", "Strict", "None").contains(cookieSameSite)
                 || (!cookieSecure && "None".equals(cookieSameSite))) {
             throw new IllegalArgumentException("Invalid cookie policy");
         }
-        allowedOrigins.forEach(origin -> com.pueblo.api.ExternalUrlPolicy.requireWebUrl(origin,!cookieSecure,true));
+        allowedOrigins.forEach(origin -> ExternalUrlPolicy.requireWebUrl(origin,!cookieSecure,true));
         if (allowedOrigins.stream().anyMatch(v -> v.contains("*"))) {
             throw new IllegalArgumentException("Explicit origins required");
         }

@@ -2,16 +2,16 @@ package com.pueblo.catalog.api;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pueblo.api.ApiException;
-import com.pueblo.api.ErrorCode;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import static com.pueblo.catalog.api.CatalogModels.*;
 
 @Service
@@ -120,6 +120,6 @@ public class CatalogService {
     private static void paging(int page,int size) { if(page<1 || page>100000 || size<1 || size>100) throw invalid(); }
     private static void uuid(String id) { try { if(!UUID.fromString(id).toString().equals(id)) throw invalid(); } catch(IllegalArgumentException ex) { throw invalid(); } }
     public static void slug(String slug) { if(!slug.matches("[a-z0-9][a-z0-9-]{0,99}")) throw invalid(); }
-    private static ApiException invalid() { return new ApiException(ErrorCode.INVALID_INPUT); }
-    private static ApiException missing() { return new ApiException(ErrorCode.NOT_FOUND); }
+    private static BusinessException invalid() { return new BusinessException(CommonErrorCode.INVALID_INPUT); }
+    private static BusinessException missing() { return new BusinessException(CommonErrorCode.NOT_FOUND); }
 }

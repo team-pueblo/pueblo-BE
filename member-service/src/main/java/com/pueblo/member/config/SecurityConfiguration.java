@@ -1,7 +1,9 @@
 package com.pueblo.member.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pueblo.api.ApiErrors;
+import com.pueblo.common.security.ApiAccessDeniedHandler;
+import com.pueblo.common.security.ApiAuthenticationEntryPoint;
+import com.pueblo.common.security.ApiCorsProcessor;
 import com.pueblo.member.auth.AuthProperties;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -29,9 +31,9 @@ public class SecurityConfiguration {
         origins.setAllowedHeaders(List.of("Authorization","Content-Type","X-XSRF-TOKEN","X-Request-ID"));
         var cors=new UrlBasedCorsConfigurationSource(); cors.registerCorsConfiguration("/**",origins);
         var corsFilter=new org.springframework.web.filter.CorsFilter(cors);
-        corsFilter.setCorsProcessor(new com.pueblo.api.ApiCorsProcessor(mapper));
-        AuthenticationEntryPoint unauthorized=(request,response,error)->ApiErrors.write(mapper,request,response,error instanceof org.springframework.security.authentication.AuthenticationServiceException ? com.pueblo.api.ErrorCode.AUTH_STORE_UNAVAILABLE : com.pueblo.api.ErrorCode.INVALID_CREDENTIALS);
-        AccessDeniedHandler denied=(request,response,error)->ApiErrors.write(mapper,request,response,error instanceof CsrfException ? com.pueblo.api.ErrorCode.CSRF_INVALID : com.pueblo.api.ErrorCode.ACCESS_DENIED);
+        corsFilter.setCorsProcessor(new ApiCorsProcessor(mapper));
+        AuthenticationEntryPoint unauthorized=new ApiAuthenticationEntryPoint(mapper);
+        AccessDeniedHandler denied=new ApiAccessDeniedHandler(mapper);
         JwtGrantedAuthoritiesConverter roles=new JwtGrantedAuthoritiesConverter();
         roles.setAuthoritiesClaimName("role"); roles.setAuthorityPrefix("ROLE_");
         JwtAuthenticationConverter jwt=new JwtAuthenticationConverter(); jwt.setJwtGrantedAuthoritiesConverter(roles);

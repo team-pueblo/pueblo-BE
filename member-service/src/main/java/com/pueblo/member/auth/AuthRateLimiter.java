@@ -1,11 +1,11 @@
 package com.pueblo.member.auth;
 
-import com.pueblo.api.ApiException;
+import com.pueblo.common.exception.BusinessException;
+import com.pueblo.common.exception.CommonErrorCode;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -37,6 +37,6 @@ public class AuthRateLimiter {
                     (rs, n) -> new long[]{rs.getLong("attempts"), Math.max(1, Duration.between(clock.instant(),
                             AuthRepository.time(rs,"window_start").plus(window)).toSeconds())}, key);
         }));
-        if (result[0] > limit) throw new ApiException(com.pueblo.api.ErrorCode.RATE_LIMITED, result[1]);
+        if (result[0] > limit) throw new BusinessException(CommonErrorCode.RATE_LIMITED, result[1]);
     }
 }

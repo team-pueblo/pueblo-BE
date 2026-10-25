@@ -19,6 +19,7 @@ JDK 21과 Docker Compose v2를 준비합니다.
 - [Swagger 접속·사용법](docs/swagger.md): 서비스별 UI 주소, JWT·CSRF 인증
 
 - [보안 정책과 검사](docs/security.md): Stateless·Redis Rotation·한영 ErrorCode·보안 CI
+- [공통 오류·보안·로깅 구조](docs/common.md): common 패키지, 오류 DTO·상세 검증, 요청 추적·로그 마스킹
 
 - [회원 인증 API와 실행 설정](docs/member-auth.md): JWT·쿠키·CSRF·이메일·MySQL 통합 검증
 
