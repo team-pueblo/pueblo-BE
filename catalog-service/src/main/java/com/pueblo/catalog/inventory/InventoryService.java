@@ -145,8 +145,13 @@ public final class InventoryService {
                     UPDATE catalog_sku s JOIN catalog_product p ON p.id=s.product_id JOIN catalog_brand b ON b.id=p.brand_id
                     SET s.stock=s.stock-?
                     WHERE s.id=? AND s.stock>=? AND s.purchase_limit>=? AND s.active=TRUE AND p.status='PUBLISHED' AND b.active=TRUE
-                    """, item.quantity(), item.skuId().toString(), item.quantity(), item.quantity());
-            if (changed != 1) { failure = "INVENTORY_UNAVAILABLE"; break; }
+                      AND (? IS NULL OR COALESCE(s.price_override,p.sale_price)=?)
+                    """, item.quantity(), item.skuId().toString(), item.quantity(), item.quantity(), item.expectedUnitPrice(), item.expectedUnitPrice());
+            if (changed != 1) {
+                var prices = jdbc.queryForList("SELECT COALESCE(s.price_override,p.sale_price) FROM catalog_sku s JOIN catalog_product p ON p.id=s.product_id WHERE s.id=?", Long.class, item.skuId().toString());
+                failure = item.expectedUnitPrice() != null && !prices.isEmpty() && !prices.getFirst().equals(item.expectedUnitPrice()) ? "PRICE_CHANGED" : "INVENTORY_UNAVAILABLE";
+                break;
+            }
             jdbc.update("INSERT INTO inventory_reservation_item(reservation_id,sku_id,quantity) VALUES(?,?,?)",
                     c.reservationId().toString(), item.skuId().toString(), item.quantity());
         }

@@ -3,3 +3,33 @@ dependencies {
 }
 
 dependencies { implementation project(':api-web') }
+
+dependencies {
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mysql'
+    testImplementation 'org.testcontainers:kafka'
+}
+sourceSets {
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+// Test harness starts separate apps and separate databases. No production module dependency.
+dependencies { integrationTestImplementation files(project(':catalog-service').sourceSets.main.output) }
+tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Order HTTP and signed Kafka inventory flow across isolated MySQL databases.'
+    dependsOn ':catalog-service:classes'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    maxHeapSize = '512m'
+    systemProperty 'pueblo.repo.root', rootProject.projectDir.absolutePath
+    shouldRunAfter tasks.named('test')
+}

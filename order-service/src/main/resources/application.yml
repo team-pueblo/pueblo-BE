@@ -57,9 +57,16 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,db
+          include: readinessState,db,orders
 
 pueblo:
+  orders:
+    enabled: ${ORDER_FLOW_ENABLED:false}
+    member-url: ${ORDER_MEMBER_URL:http://localhost:8081}
+    catalog-url: ${ORDER_CATALOG_URL:http://localhost:8082}
+    inventory-secret: ${INVENTORY_COMMAND_SECRET:}
+    terms-version: ${ORDER_TERMS_VERSION:purchase-v1}
+    allowed-origins: ${AUTH_ALLOWED_ORIGINS:http://localhost:5173}
   messaging:
     enabled: true
     poll-interval-ms: 1000

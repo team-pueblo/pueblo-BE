@@ -2,7 +2,7 @@
 
 카탈로그 서비스가 SKU 가용 재고와 예약 원장을 소유한다. `catalog_sku.stock`은 예약되지 않은 수량이다. 예약 시 차감하고 확정 시 다시 차감하지 않으며 해제·만료·확정 후 환불 복원 시 돌려준다. Redis 분산락은 사용하지 않는다.
 
-주문·결제 서비스의 실제 업무 흐름, 운영자 입고/재고 조정 API, 출고 검증은 후속 작업이다. 이 변경은 재고 명령 처리기·Kafka 수신·Outbox 결과·만료 작업을 제공한다. 재고 변경 HTTP 엔드포인트는 없다.
+[주문 접수·재고 예약·미결제 취소](orders.md)는 연결했다. 실제 결제 승인/환불, 운영자 입고/재고 조정 API, 출고 검증은 후속 작업이다. 이 변경은 재고 명령 처리기·Kafka 수신·Outbox 결과·만료 작업을 제공한다. 재고 변경 HTTP 엔드포인트는 없다.
 
 ## 상태와 트랜잭션
 
@@ -40,15 +40,15 @@
   "orderId": "00000000-0000-0000-0000-000000000002",
   "reservationId": "00000000-0000-0000-0000-000000000003",
   "generation": 1,
-  "items": [{"skuId": "00000000-0000-0000-0000-000000000004", "quantity": 1}],
+  "items": [{"skuId": "00000000-0000-0000-0000-000000000004", "quantity": 1, "expectedUnitPrice": 29000}],
   "commandExpiresAt": "2026-10-25T03:00:25Z",
   "refundId": null
 }
 ```
 
-RESERVE/REACQUIRE만 items와 commandExpiresAt을 전달한다. 나머지는 items를 빈 배열, commandExpiresAt을 null로 전달한다. RESTORE만 refundId가 필수다. 외부 Kafka 입력에서 EXPIRE는 거부한다.
+RESERVE/REACQUIRE만 items와 commandExpiresAt을 전달한다. 주문 서비스는 expectedUnitPrice를 반드시 넣으며 재고 차감 시 현재 단가와 대조한다. 기존 명령 호환을 위해 이 필드는 선택이며 누락 시 가격 검사를 생략하고 기존 명령 해시 형식을 유지한다. 다른 가격으로 동일 SKU를 중복 입력할 수 없다. 나머지는 items를 빈 배열, commandExpiresAt을 null로 전달한다. RESTORE만 refundId가 필수다. 외부 Kafka 입력에서 EXPIRE는 거부한다.
 
-결과는 `InventoryReserved`, `InventoryCommitted`, `InventoryReleased`, `InventoryExpired`, `InventoryRestored` 또는 `InventoryCommandRejected`다. 결과 payload는 commandId·orderId·reservationId·generation·eventType·state·reason·reservedAt·expiresAt·version이다. 성공 reason은 null이다. 주요 거부 사유는 `INVENTORY_UNAVAILABLE`, `COMMAND_EXPIRED`, `COMMAND_DEADLINE_TOO_FAR`, `STALE_GENERATION`, `ACTIVE_GENERATION`, `RESERVATION_ID_CONFLICT`, `RESERVATION_PAYLOAD_CONFLICT`, `RESERVATION_EXPIRED`, `INVALID_STATE`, `UNKNOWN_RESERVATION`이다.
+결과는 `InventoryReserved`, `InventoryCommitted`, `InventoryReleased`, `InventoryExpired`, `InventoryRestored` 또는 `InventoryCommandRejected`다. 결과 payload는 commandId·orderId·reservationId·generation·eventType·state·reason·reservedAt·expiresAt·version이다. 성공 reason은 null이다. 주요 거부 사유는 `INVENTORY_UNAVAILABLE`, `PRICE_CHANGED`, `COMMAND_EXPIRED`, `COMMAND_DEADLINE_TOO_FAR`, `STALE_GENERATION`, `ACTIVE_GENERATION`, `RESERVATION_ID_CONFLICT`, `RESERVATION_PAYLOAD_CONFLICT`, `RESERVATION_EXPIRED`, `INVALID_STATE`, `UNKNOWN_RESERVATION`이다.
 
 version은 주문별 처리 순서다. 결과 소비자는 버전과 예약 ID/세대를 함께 확인해야 한다. 오래된 동일 명령 재시도는 최초 결과를 반환하므로 최신 상태 조회를 대신하지 않는다. 새로운 명령 ID의 업무 재시도는 새 결과 이벤트를 만들 수 있지만 재고 효과는 한 번만 발생한다. 결과 전달은 기존 Outbox의 at-least-once 계약이며 주문 서비스에서 이벤트 중복 처리가 필요하다.
 
@@ -60,7 +60,7 @@ Kafka header `pueblo-inventory-signature`는 **전송하는 EventEnvelope JSON �
 - payload가 64KiB를 넘거나 서명 누락/중복·변조·잘못된 생산자/키/스키마이면 재고를 변경하지 않는다. producer 필드만으로 인증하지 않는다.
 - 인증·형식 오류 또는 재시도 후 DB 실패는 기존 `CommonContainerStoppingErrorHandler`가 소비기를 중단하고 미처리 offset을 넘기지 않는다. readiness의 inventory 상태도 DOWN으로 표시한다. 원인 해결 및 해당 레코드의 운영 처리가 필요하며 현재 자동 DLQ는 없다.
 - HMAC은 메시지 인증이고 암호화는 아니다. 운영 Kafka에는 TLS·SASL·토픽 ACL이 추가로 필요하다. Istio HTTP mTLS만으로 Kafka 생산자 권한을 보장하지 않는다. 결과 토픽의 생산자 ACL도 필요하다.
-- 현재 주문 서비스의 일반 Outbox 발행기는 이 서명 헤더를 생성하지 않는다. 주문 흐름 연결 시 생산자 서명 및 키 교체 절차를 추가해야 하며, 이번 변경만으로 주문·결제 전체 연동이 완성되지 않는다.
+- 주문 Outbox 발행기는 명령 서명을 추가하고 카탈로그 발행기는 같은 방식으로 `pueblo-inventory-result-signature` 결과 헤더를 추가한다. 주문 서비스도 결과 서명을 확인한다. 단계적 배포 시 카탈로그부터 갱신한 뒤 주문 기능을 켠다. 키 교체는 현재 동시 전환이 필요하며 다중 키 유예 기간 지원은 후속 범위다.
 
 ## 실행 설정
 
