@@ -60,6 +60,15 @@ management:
           include: readinessState,db
 
 pueblo:
+  payments:
+    enabled: ${PAYMENT_FLOW_ENABLED:false}
+    member-url: ${PAYMENT_MEMBER_URL:http://localhost:8081}
+    order-url: ${PAYMENT_ORDER_URL:http://localhost:8083}
+    order-token: ${ORDER_PAYMENT_SERVICE_TOKEN:}
+    toss-secret: ${TOSS_SECRET_KEY:}
+    event-secret: ${PAYMENT_EVENT_SECRET:}
+    allowed-origins: ${AUTH_ALLOWED_ORIGINS:http://localhost:5173}
+    reconciliation-enabled: ${PAYMENT_RECONCILIATION_ENABLED:true}
   messaging:
     enabled: true
     poll-interval-ms: 1000

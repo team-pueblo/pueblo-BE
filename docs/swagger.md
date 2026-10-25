@@ -2,6 +2,8 @@
 
 
 [주문 결제 시도 접수](order-payment-preparation.md)는 서비스 전용 내부 API로 Swagger에서 숨긴다. 호출 계약·인증·환경변수는 해당 문서를 따른다.
+
+결제 서비스는 `PAYMENT_FLOW_ENABLED=true`일 때 토스 테스트 승인과 본인 결제 상태 조회 2개 API를 표시한다. [토스 설정·계약](toss-payments.md)을 따른다. Swagger의 paymentKey는 프론트 토스 인증으로 얻어야 하며 임의 값으로 승인할 수 없다.
 로컬 컨테이너에서 서비스별 Swagger UI와 OpenAPI JSON을 제공한다.
 
 | 서비스 | Swagger UI | OpenAPI JSON |
@@ -11,7 +13,7 @@
 | 주문 | http://localhost:8083/swagger-ui/index.html | http://localhost:8083/v3/api-docs |
 | 결제 | http://localhost:8084/swagger-ui/index.html | http://localhost:8084/v3/api-docs |
 
-`/swagger-ui.html`도 UI로 이동한다. 회원 서비스는 인증 API 10개, 상품 서비스는 공개 조회 API 5개를 표시한다. 주문 서비스는 `ORDER_FLOW_ENABLED=true`일 때 견적·접수·목록·상세·취소 API 5개를 표시한다. [주문 설정](orders.md)을 참고한다. 결제 서비스는 업무 API 구현 전으로 목록이 비어 있다. 상품 계약과 데이터 준비는 [카탈로그 문서](catalog.md)를 참고한다.
+`/swagger-ui.html`도 UI로 이동한다. 회원 서비스는 인증 API 10개, 상품 서비스는 공개 조회 API 5개를 표시한다. 주문 서비스는 `ORDER_FLOW_ENABLED=true`일 때 견적·접수·목록·상세·취소 API 5개를 표시한다. [주문 설정](orders.md)을 참고한다. 결제 API는 위의 별도 활성화 설정이 필요하다. 상품 계약과 데이터 준비는 [카탈로그 문서](catalog.md)를 참고한다.
 
 재고 변경은 인증된 내부 Kafka 명령으로 처리하며 Swagger용 HTTP 쓰기 API는 제공하지 않는다. [재고 계약](inventory.md)을 참고한다.
 
