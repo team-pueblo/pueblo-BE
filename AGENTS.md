@@ -7,7 +7,7 @@
 - 작업 전에 [백엔드 설계 협의 기록](docs/backend-design.md)과 관련 소스·설정·Git 상태를 확인한다.
 - 설계 문서의 **확정** 정책을 구현 기준으로 삼는다. **설계 제안**의 모듈명·상태명·이벤트명은 승인된 계약으로 단정하지 않는다.
 - 사용자 최신 지시를 우선한다. 정책·서비스 경계가 변경되면 관련 설계 문서도 갱신한다.
-- 현재 Java 21 / Spring Boot 서비스 4개, Gradle Wrapper, 로컬 서비스 4개·MySQL·Redis·Kafka Compose, `messaging-jdbc` 인프라 모듈이 있다. Istio sidecar/STRICT mTLS Kubernetes 배포 기반도 있다. 회원 인증 API·JWT·세션 폐기는 구현했다. 상품·브랜드·카테고리·SKU 조회와 오프라인 데이터 가져오기도 구현했다. [카탈로그 문서](docs/catalog.md)를 참고한다. 주문·결제·재고 예약·서비스 간 인증·도메인 이벤트 연결과 실제 클러스터 배포는 미완료다. [회원 인증 문서](docs/member-auth.md)를 참고한다. 작업 시 실제 파일을 확인한다.
+- 현재 Java 21 / Spring Boot 서비스 4개, Gradle Wrapper, 로컬 서비스 4개·MySQL·Redis·Kafka Compose, `messaging-jdbc` 인프라 모듈이 있다. Istio sidecar/STRICT mTLS Kubernetes 배포 기반도 있다. 회원 인증 API·JWT·세션 폐기는 구현했다. 상품·브랜드·카테고리·SKU 조회와 오프라인 데이터 가져오기도 구현했다. [카탈로그 문서](docs/catalog.md), [재고 내부 명령](docs/inventory.md)을 참고한다. 재고 예약·확정·해제·만료·복원과 HMAC 인증 Kafka 수신은 구현했으며 기본 비활성이다. 주문·결제 업무 흐름·서비스 간 사용자 인증과 실제 클러스터 배포는 미완료다. [회원 인증 문서](docs/member-auth.md)를 참고한다. 작업 시 실제 파일을 확인한다.
 - 버전·배포 구성·API 계약은 미정 항목을 확인하고 작업 범위에 필요한 결정을 근거와 함께 기록한다. 사소한 구현 선택마다 인터뷰를 반복하지 않는다.
 
 ## 목표와 기술 선택

@@ -57,9 +57,15 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,db
+          include: readinessState,db,inventory
 
 pueblo:
+  inventory:
+    enabled: ${INVENTORY_ENABLED:false}
+    listener-enabled: ${INVENTORY_LISTENER_ENABLED:false}
+    command-secret: ${INVENTORY_COMMAND_SECRET:}
+    expiry-enabled: ${INVENTORY_EXPIRY_ENABLED:true}
+    expiry-interval-ms: 10000
   catalog:
     allowed-origins: ${CATALOG_ALLOWED_ORIGINS:}
   messaging:

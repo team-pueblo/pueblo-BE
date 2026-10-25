@@ -7,6 +7,7 @@ dependencies { implementation project(':api-web') }
 dependencies {
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:mysql'
+    testImplementation 'org.testcontainers:kafka'
 }
 sourceSets {
     integrationTest {
@@ -22,7 +23,7 @@ configurations {
 }
 tasks.register('integrationTest', Test) {
     group = 'verification'
-    description = 'Tests catalog filtering, visibility and offline imports with MySQL.'
+    description = 'Tests catalog APIs and inventory concurrency with MySQL and Kafka.'
     testClassesDirs = sourceSets.integrationTest.output.classesDirs
     classpath = sourceSets.integrationTest.runtimeClasspath
     shouldRunAfter tasks.named('test')
