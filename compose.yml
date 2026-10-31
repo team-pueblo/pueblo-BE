@@ -252,6 +252,14 @@ services:
       DB_URL: "jdbc:mysql://mysql:3306/pueblo_payment?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
       DB_USERNAME: pueblo_payment
       DB_PASSWORD: local_payment_only
+      PAYMENT_FLOW_ENABLED: "${PAYMENT_FLOW_ENABLED:-false}"
+      PAYMENT_MEMBER_URL: http://member-service:8080
+      PAYMENT_ORDER_URL: http://order-service:8080
+      ORDER_PAYMENT_SERVICE_TOKEN: "${ORDER_PAYMENT_SERVICE_TOKEN:-}"
+      TOSS_SECRET_KEY: "${TOSS_SECRET_KEY:-}"
+      PAYMENT_EVENT_SECRET: "${PAYMENT_EVENT_SECRET:-}"
+      PAYMENT_RECONCILIATION_ENABLED: "${PAYMENT_RECONCILIATION_ENABLED:-true}"
+      AUTH_ALLOWED_ORIGINS: "${AUTH_ALLOWED_ORIGINS:-http://localhost:5173}"
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       mysql:
