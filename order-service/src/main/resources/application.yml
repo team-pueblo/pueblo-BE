@@ -62,6 +62,9 @@ management:
 pueblo:
   orders:
     enabled: ${ORDER_FLOW_ENABLED:false}
+    payment-results:
+      enabled: ${ORDER_PAYMENT_RESULTS_ENABLED:false}
+      secret: ${PAYMENT_EVENT_SECRET:}
     payment-preparation:
       enabled: ${ORDER_PAYMENT_PREPARATION_ENABLED:false}
       service-token: ${ORDER_PAYMENT_SERVICE_TOKEN:}

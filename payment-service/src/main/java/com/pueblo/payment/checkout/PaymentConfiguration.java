@@ -16,6 +16,14 @@ public class PaymentConfiguration {
     @Bean ServiceClients paymentServiceClients(JsonHttp http,@Value("${pueblo.payments.member-url}") String member,@Value("${pueblo.payments.order-url}") String order,@Value("${pueblo.payments.order-token}") String token) { return new ServiceClients(http,member,order,token); }
     @Bean TossClient tossClient(JsonHttp http,@Value("${pueblo.payments.toss-url:https://api.tosspayments.com}") String url,@Value("${pueblo.payments.toss-secret}") String key,@Value("${pueblo.payments.mock:false}") boolean mock) { return new TossClient(http,url,key,mock); }
     @Bean PaymentService paymentService(JdbcTemplate jdbc,PlatformTransactionManager manager,ServiceClients clients,TossClient toss,JdbcOutbox outbox,ObjectMapper mapper) { return new PaymentService(jdbc,manager,clients,toss,outbox,mapper); }
+    @Bean RefundService refundService(JdbcTemplate jdbc,PlatformTransactionManager manager,TossClient toss,JdbcOutbox outbox,ObjectMapper mapper) {return new RefundService(jdbc,manager,toss,outbox,mapper);}
+    @Bean @ConditionalOnProperty(name="pueblo.payments.refunds-enabled",havingValue="true")
+    RefundWorker refundWorker(RefundService service) {return new RefundWorker(service);}
+    static final class RefundWorker {
+        private final RefundService service;
+        RefundWorker(RefundService service) {this.service=service;}
+        @Scheduled(fixedDelayString="${pueblo.payments.reconciliation-ms:5000}") public void tick() {service.recoverBatch();}
+    }
     @Bean KafkaRecordCustomizer paymentResultSigner(@Value("${pueblo.payments.event-secret}") String secret) {
         var signature=new HmacMessageSignature(secret);
         return (source,message)->{ if(source.topic().equals(PaymentService.RESULTS_TOPIC)) message.headers().add("pueblo-payment-result-signature",signature.sign((String)message.value())); };

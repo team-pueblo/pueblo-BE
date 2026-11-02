@@ -2,6 +2,7 @@
 
 
 [주문 결제 시도 접수](docs/order-payment-preparation.md)의 내부 API·인증·상태 전이·검증 기준을 따른다.
+[결제 복구와 주문 후속 처리](docs/payment-recovery.md)는 paymentKey 재조회·결과 소비·재고 확정/재확보·재확보 실패 보상 환불을 구현했다. 별도 기능 플래그로 활성화하며 일반 취소/환불·출고는 후속 범위다.
 [토스 테스트 승인·조회](docs/toss-payments.md)는 payment-service에 구현했다. 라이브 키는 거부하며 주문 결과 소비·재고 확정·환불이 완료되기 전에 판매용으로 활성화하지 않는다. 결제 실패를 HTTP 오류나 조회 404만으로 확정하지 않는다.
 이 문서는 저장소 전체에서 작업하는 에이전트에게 적용한다. 사용자에게는 한국어로 설명하고, 구현 결과와 설계 제안·미정 사항을 구분해서 보고한다.
 
@@ -10,7 +11,7 @@
 - 작업 전에 [백엔드 설계 협의 기록](docs/backend-design.md)과 관련 소스·설정·Git 상태를 확인한다.
 - 설계 문서의 **확정** 정책을 구현 기준으로 삼는다. **설계 제안**의 모듈명·상태명·이벤트명은 승인된 계약으로 단정하지 않는다.
 - 사용자 최신 지시를 우선한다. 정책·서비스 경계가 변경되면 관련 설계 문서도 갱신한다.
-- 현재 Java 21 / Spring Boot 서비스 4개, Gradle Wrapper, 로컬 서비스 4개·MySQL·Redis·Kafka Compose, `messaging-jdbc` 인프라 모듈이 있다. Istio sidecar/STRICT mTLS Kubernetes 배포 기반도 있다. 회원 인증 API·JWT·세션 폐기는 구현했다. 상품·브랜드·카테고리·SKU 조회와 오프라인 데이터 가져오기도 구현했다. [카탈로그 문서](docs/catalog.md), [재고 내부 명령](docs/inventory.md)을 참고한다. 재고 예약·확정·해제·만료·복원과 HMAC 인증 Kafka 수신은 구현했으며 기본 비활성이다. 견적·주문 접수·Kafka 재고 예약 연동·미결제 취소와 회원 API 기반 사용자 인증도 구현했다. 기본 비활성이며 [주문 문서](docs/orders.md)를 따른다. 실제 결제 승인·환불·출고와 클러스터 배포는 미완료다. [회원 인증 문서](docs/member-auth.md)를 참고한다. 작업 시 실제 파일을 확인한다.
+- 현재 Java 21 / Spring Boot 서비스 4개, Gradle Wrapper, 로컬 서비스 4개·MySQL·Redis·Kafka Compose, `messaging-jdbc` 인프라 모듈이 있다. Istio sidecar/STRICT mTLS Kubernetes 배포 기반도 있다. 회원 인증 API·JWT·세션 폐기는 구현했다. 상품·브랜드·카테고리·SKU 조회와 오프라인 데이터 가져오기도 구현했다. [카탈로그 문서](docs/catalog.md), [재고 내부 명령](docs/inventory.md)을 참고한다. 재고 예약·확정·해제·만료·복원과 HMAC 인증 Kafka 수신은 구현했으며 기본 비활성이다. 견적·주문 접수·Kafka 재고 예약 연동·미결제 취소와 회원 API 기반 사용자 인증도 구현했다. 기본 비활성이며 [주문 문서](docs/orders.md)를 따른다. 토스 테스트 승인·결과 복구·주문 재고 확정/재확보·재확보 실패 보상 환불을 구현했다. 일반 취소/환불·출고와 클러스터 배포는 미완료다. [회원 인증 문서](docs/member-auth.md)를 참고한다. 작업 시 실제 파일을 확인한다.
 - 버전·배포 구성·API 계약은 미정 항목을 확인하고 작업 범위에 필요한 결정을 근거와 함께 기록한다. 사소한 구현 선택마다 인터뷰를 반복하지 않는다.
 
 ## 목표와 기술 선택

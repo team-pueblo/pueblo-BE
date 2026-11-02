@@ -28,6 +28,12 @@ public class OrderConfiguration {
                 record.headers().add(new RecordHeader("pueblo-inventory-signature",signature.sign((String)record.value())));
         };
     }
+    @Bean @ConditionalOnProperty(name="pueblo.orders.payment-results.enabled",havingValue="true")
+    KafkaRecordCustomizer refundCommandSigner(@Value("${pueblo.orders.payment-results.secret:}") String secret) {
+        var signature=new HmacMessageSignature(secret);
+        return (source,record)->{if(source.topic().equals("pueblo.payment.refunds.v1"))
+            record.headers().add(new RecordHeader("pueblo-payment-refund-signature",signature.sign((String)record.value())));};
+    }
     @Bean OrderTimeoutJob orderTimeoutJob(OrderService service) { return new OrderTimeoutJob(service); }
     public static class OrderTimeoutJob {
         private final OrderService service;

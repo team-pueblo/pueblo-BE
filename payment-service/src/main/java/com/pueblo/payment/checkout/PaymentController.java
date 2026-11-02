@@ -21,6 +21,11 @@ public class PaymentController {
         int code=java.util.Set.of("PREPARING","PROCESSING","UNKNOWN").contains(result.status())?202:200;
         return ResponseEntity.status(code).body(ApiResponse.of(result,request));
     }
+    @PostMapping("/api/v1/me/payments/orders/{orderId}/rechecks")
+    @io.swagger.v3.oas.annotations.Operation(summary="본인 결제의 토스 결과 재조회",description="신규 승인 없이 저장된 paymentKey로 조회합니다. 10초 간격과 작업 점유를 적용하며 확인 필요 상태도 재조회할 수 있습니다. 주문 상태는 결과 이벤트 소비 후 별도로 확인합니다.")
+    public ApiResponse<View> recheck(Principal user,@PathVariable UUID orderId,HttpServletRequest request) {
+        return ApiResponse.of(service.recheck(UUID.fromString(user.getName()),orderId),request);
+    }
     @GetMapping("/api/v1/me/payments/orders/{orderId}")
     @io.swagger.v3.oas.annotations.Operation(summary="본인 주문의 결제 처리 상태 조회")
     public ApiResponse<View> get(Principal user,@PathVariable UUID orderId,HttpServletRequest request) {

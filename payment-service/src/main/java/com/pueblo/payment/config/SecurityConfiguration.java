@@ -37,7 +37,7 @@ public class SecurityConfiguration {
                         .frameOptions(f->f.deny()).referrerPolicy(r->r.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers("/api/v1/payments/confirm","/api/v1/me/payments/orders/*").authenticated()
+                        .requestMatchers("/api/v1/payments/confirm","/api/v1/me/payments/orders/*","/api/v1/me/payments/orders/*/rechecks").authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions
                         .accessDeniedHandler(new ApiAccessDeniedHandler(mapper))
