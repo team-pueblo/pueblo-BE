@@ -57,11 +57,12 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,db
+          include: readinessState,db,paymentRefunds
 
 pueblo:
   payments:
     enabled: ${PAYMENT_FLOW_ENABLED:false}
+    refunds-enabled: ${PAYMENT_REFUNDS_ENABLED:false}
     member-url: ${PAYMENT_MEMBER_URL:http://localhost:8081}
     order-url: ${PAYMENT_ORDER_URL:http://localhost:8083}
     order-token: ${ORDER_PAYMENT_SERVICE_TOKEN:}

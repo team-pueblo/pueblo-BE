@@ -30,7 +30,7 @@ class TossPaymentIntegrationTest {
     static final ObjectMapper JSON=new ObjectMapper();
     static final HttpClient HTTP=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     static final Map<String,JsonNode> prepared=new ConcurrentHashMap<>(),provider=new ConcurrentHashMap<>();
-    static final AtomicInteger confirmations=new AtomicInteger(),queries=new AtomicInteger();
+    static final AtomicInteger confirmations=new AtomicInteger(),queries=new AtomicInteger(),refunds=new AtomicInteger();
     static volatile String mode="success";
     static volatile boolean correctAuth,correctIdempotency;
     static HttpServer remote; static ExecutorService remoteThreads;
@@ -83,9 +83,19 @@ class TossPaymentIntegrationTest {
             if(mode.equals("error")) { reply(e,500,Map.of("message","private upstream error"));return; }
             reply(e,200,result);return;
         }
-        if(path.startsWith("/v1/payments/orders/")) {
-            queries.incrementAndGet();String id=path.substring("/v1/payments/orders/".length());
-            reply(e,provider.containsKey(id)?200:404,provider.getOrDefault(id,JSON.createObjectNode()));return;
+        if(path.startsWith("/v1/payments/orders/")) {reply(e,404,Map.of("code","NOT_FOUND_MERCHANT"));return;}
+        if(path.startsWith("/v1/payments/")) {
+            String key=path.substring("/v1/payments/".length()).replace("/cancel","");
+            var found=provider.values().stream().filter(p->key.equals(p.path("paymentKey").asText())).findFirst();
+            if(path.endsWith("/cancel")) {
+                refunds.incrementAndGet();
+                if(found.isPresent()) {
+                    var p=(com.fasterxml.jackson.databind.node.ObjectNode)found.get();p.put("status","CANCELED").put("balanceAmount",0);
+                    p.putArray("cancels").addObject().put("cancelStatus","DONE").put("cancelAmount",10000);
+                    if(mode.equals("refund-lost")) {e.close();return;}
+                }
+            } else queries.incrementAndGet();
+            reply(e,found.isPresent()?200:404,found.orElse(JSON.createObjectNode()));return;
         }
         reply(e,404,Map.of());
     }
@@ -93,7 +103,7 @@ class TossPaymentIntegrationTest {
         byte[] bytes=JSON.writeValueAsBytes(body);e.getResponseHeaders().add("Content-Type","application/json");e.sendResponseHeaders(status,bytes.length);e.getResponseBody().write(bytes);e.close();
     }
     @AfterAll static void stop() { if(app!=null)app.close();if(remote!=null)remote.stop(0);if(remoteThreads!=null)remoteThreads.close(); }
-    @BeforeEach void reset() { mode="success";confirmations.set(0);queries.set(0); }
+    @BeforeEach void reset() { mode="success";confirmations.set(0);queries.set(0);refunds.set(0); }
     HttpResponse<String> call(String method,String path,Object body,String user) throws Exception {
         var b=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).timeout(Duration.ofSeconds(25)).header("Content-Type","application/json");
         if(user!=null)b.header("Authorization","Bearer "+user);
@@ -188,4 +198,76 @@ class TossPaymentIntegrationTest {
         new HmacMessageSignature(EVENT).verify(json,kafka.headers(),"pueblo-payment-result-signature");
         assertThat(kafka.headers().lastHeader("Authorization")).isNull();
     }
+    @Test @Order(12) void ownerRecheckResolvesReviewAndAuditsWithoutApproval() throws Exception {
+        UUID id=UUID.randomUUID();mode="lost";data(confirm(id),202);
+        db.update("UPDATE payment_attempt SET status='REVIEW_REQUIRED',checks=20,next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE order_id=?",id.toString());
+        String path="/api/v1/me/payments/orders/"+id+"/rechecks";
+        assertThat(call("POST",path,null,null).statusCode()).isEqualTo(401);
+        assertThat(call("POST",path,null,"other").statusCode()).isEqualTo(404);
+        assertThat(data(call("POST",path,null,"user"),200).path("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(confirmations.get()).isEqualTo(1);assertThat(queries.get()).isEqualTo(1);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM payment_recheck_audit WHERE resulting_status='SUCCEEDED'",Integer.class)).isEqualTo(1);
+        call("POST",path,null,"user");assertThat(queries.get()).isEqualTo(1);
+    }
+    @Test @Order(13) void reviewStaysUncertainAndRechecksAreThrottled() throws Exception {
+        UUID id=UUID.randomUUID();mode="lost";data(confirm(id),202);
+        ((com.fasterxml.jackson.databind.node.ObjectNode)provider.get(id.toString())).put("status","IN_PROGRESS");
+        db.update("UPDATE payment_attempt SET status='REVIEW_REQUIRED',checks=20,next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE order_id=?",id.toString());
+        String path="/api/v1/me/payments/orders/"+id+"/rechecks";
+        assertThat(data(call("POST",path,null,"user"),200).path("status").asText()).isEqualTo("REVIEW_REQUIRED");
+        call("POST",path,null,"user");assertThat(queries.get()).isEqualTo(1);assertThat(confirmations.get()).isEqualTo(1);
+        provider.remove(id.toString());
+        db.update("UPDATE payment_attempt SET next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE order_id=?",id.toString());
+        assertThat(data(call("POST",path,null,"user"),200).path("status").asText()).isEqualTo("REVIEW_REQUIRED");
+    }
+    @Test @Order(14) void fullRefundResponseLossRecoversWithoutSecondCancel() throws Exception {
+        UUID id=UUID.randomUUID();var payment=data(confirm(id),200);
+        var service=app.getBean(com.pueblo.payment.checkout.RefundService.class);
+        UUID refund=UUID.randomUUID();var request=new com.pueblo.payment.checkout.RefundService.Request(refund,UUID.fromString(payment.path("paymentId").asText()),id,10000,"KRW");
+        service.accept(request);service.accept(request);mode="refund-lost";service.recoverBatch();
+        assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,refund.toString())).isEqualTo("UNKNOWN");
+        app.close();launch();
+        db.update("UPDATE refund_attempt SET next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE id=?",refund.toString());
+        app.getBean(com.pueblo.payment.checkout.RefundService.class).recoverBatch();
+        assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,refund.toString())).isEqualTo("SUCCEEDED");
+        assertThat(refunds.get()).isEqualTo(1);
+        assertThat(db.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE aggregate_id=? AND event_type='RefundSucceeded'",Integer.class,id.toString())).isEqualTo(1);
+    }
+
+    @Test @Order(15) void refundCommandAuthenticationAndConcurrentWorkersAreIdempotent() throws Exception {
+        UUID id=UUID.randomUUID();var payment=data(confirm(id),200);UUID refund=UUID.randomUUID();
+        var request=new com.pueblo.payment.checkout.RefundService.Request(refund,UUID.fromString(payment.path("paymentId").asText()),id,10000,"KRW");
+        var service=app.getBean(com.pueblo.payment.checkout.RefundService.class);
+        var eventMapper=app.getBean(ObjectMapper.class);
+        var listener=new com.pueblo.payment.checkout.RefundListener(eventMapper,service,EVENT);
+        var event=new EventEnvelope(refund,"RefundRequested",1,"order-service",id.toString(),1,java.time.Instant.now(),id.toString(),request.paymentId().toString(),null,JSON.valueToTree(request));
+        String text=eventMapper.writeValueAsString(event);
+        var record=new org.apache.kafka.clients.consumer.ConsumerRecord<String,String>("pueblo.payment.refunds.v1",0,0,id.toString(),text);
+        assertThatThrownBy(()->listener.receive(record)).isInstanceOf(IllegalArgumentException.class);
+        record.headers().add("pueblo-payment-refund-signature",new HmacMessageSignature(EVENT).sign(text));
+        listener.receive(record);listener.receive(record);
+        assertThatThrownBy(()->service.accept(new com.pueblo.payment.checkout.RefundService.Request(UUID.randomUUID(),request.paymentId(),id,10000,"KRW"))).isInstanceOf(IllegalArgumentException.class);
+        try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            var start=new CountDownLatch(1);
+            var a=pool.submit(()->{start.await();return service.recoverBatch();});
+            var b=pool.submit(()->{start.await();return service.recoverBatch();});start.countDown();a.get(30,TimeUnit.SECONDS);b.get(30,TimeUnit.SECONDS);
+        }
+        assertThat(refunds.get()).isEqualTo(1);
+        assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,refund.toString())).isEqualTo("SUCCEEDED");
+    }
+    @Test @Order(16) void refundMismatchAndLookup404NeverBecomeSuccess() throws Exception {
+        UUID id=UUID.randomUUID();var payment=data(confirm(id),200);UUID refund=UUID.randomUUID();
+        var service=app.getBean(com.pueblo.payment.checkout.RefundService.class);
+        service.accept(new com.pueblo.payment.checkout.RefundService.Request(refund,UUID.fromString(payment.path("paymentId").asText()),id,10000,"KRW"));
+        provider.remove(id.toString());service.recoverBatch();
+        assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,refund.toString())).isEqualTo("UNKNOWN");
+        db.update("UPDATE refund_attempt SET checks=19,next_check_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE id=?",refund.toString());service.recoverBatch();
+        assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,refund.toString())).isEqualTo("REVIEW_REQUIRED");
+        assertThat(refunds.get()).isEqualTo(1);
+        UUID other=UUID.randomUUID();var next=data(confirm(other),200);UUID another=UUID.randomUUID();
+        service.accept(new com.pueblo.payment.checkout.RefundService.Request(another,UUID.fromString(next.path("paymentId").asText()),other,10000,"KRW"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)provider.get(other.toString())).put("totalAmount",1);
+        service.recoverBatch();assertThat(db.queryForObject("SELECT status FROM refund_attempt WHERE id=?",String.class,another.toString())).isEqualTo("REVIEW_REQUIRED");
+    }
+
 }

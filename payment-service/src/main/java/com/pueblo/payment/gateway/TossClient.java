@@ -21,8 +21,12 @@ public final class TossClient {
         return http.call(base,"POST","/v1/payments/confirm",Map.of("Authorization",authorization,"Idempotency-Key",paymentId.toString()),
                 Map.of("orderId",orderId.toString(),"paymentKey",paymentKey,"amount",amount));
     }
-    public JsonHttp.Reply find(UUID orderId) {
-        return http.call(base,"GET","/v1/payments/orders/"+orderId,Map.of("Authorization",authorization),null);
+    public JsonHttp.Reply find(String paymentKey) {
+        return http.call(base,"GET","/v1/payments/"+segment(paymentKey),Map.of("Authorization",authorization),null);
+    }
+    private String segment(String key) { return java.net.URLEncoder.encode(key,StandardCharsets.UTF_8).replace("+","%20"); }
+    public JsonHttp.Reply refund(String key,UUID refundId) {
+        return http.call(base,"POST","/v1/payments/"+segment(key)+"/cancel",Map.of("Authorization",authorization,"Idempotency-Key",refundId.toString()),Map.of("cancelReason","Inventory unavailable after late approval"));
     }
     /** Never considers HTTP 200 alone to be an approved, matching payment. */
     public static String outcome(JsonHttp.Reply reply,UUID orderId,String paymentKey,long amount) {

@@ -18,4 +18,19 @@ class TossClientTest {
         for(String url:new String[]{"http://example.com","http://localhost/else","https://user@example.com","http://localhost?key=x"})
             assertThatThrownBy(()->JsonHttp.serviceUrl(url,"order-service")).isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void widgetKeyLookupUsesEncodedPaymentKeyAsOnePathSegment() throws Exception {
+        var server=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+        var path=new java.util.concurrent.atomic.AtomicReference<String>();
+        server.createContext("/",exchange->{
+            path.set(exchange.getRequestURI().getRawPath());
+            byte[] bytes="{}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();
+        });
+        server.start();
+        try {
+            new TossClient(http,"http://127.0.0.1:"+server.getAddress().getPort(),"test_gsk_fixture_key",true).find("key/a?b#c+d");
+            assertThat(path.get()).isEqualTo("/v1/payments/key%2Fa%3Fb%23c%2Bd");
+        } finally {server.stop(0);}
+    }
+
 }

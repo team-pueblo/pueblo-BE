@@ -4,7 +4,7 @@
 
 주문 서비스가 회원 API로 인증하고, 상품 API로 가격을 확인한 뒤 자기 MySQL DB에 견적·주문·멱등 결과·Outbox를 저장한다. 상품/재고 서비스는 Kafka 명령으로 재고를 확보하고 결과를 전달한다. 서로의 DB나 도메인 구현을 직접 참조하지 않는다.
 
-`PENDING_PAYMENT`는 재고 확보 완료를 뜻한다. 이후 [결제 시도 접수](order-payment-preparation.md)를 활성화하면 `PAYMENT_PROCESSING`으로 전환하며 일반 취소를 차단한다. 처리 중 예약 만료는 `RECONCILIATION_REQUIRED`로 보존하고 재고를 해제한다. 실제 PG 승인·결제 UI·환불·출고·장바구니 정리는 아직 연결하지 않았다.
+`PENDING_PAYMENT`는 재고 확보 완료를 뜻한다. 이후 [결제 시도 접수](order-payment-preparation.md)를 활성화하면 `PAYMENT_PROCESSING`으로 전환하며 일반 취소를 차단한다. 처리 중 예약 만료는 `RECONCILIATION_REQUIRED`로 보존하고 재고를 해제한다. [결제 복구](payment-recovery.md)는 실패 주문 종료·재고 확정/재확보·재확보 실패 보상 환불을 연결한다. 별도 활성화가 필요하며 출고·일반 취소/환불·장바구니 정리는 별도 범위다.
 
 ## 실행
 

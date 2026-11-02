@@ -167,10 +167,11 @@ public final class OrderService {
             if(inserted==0) return;
             Row row=row(result.orderId(),true);
             if(row==null) throw new IllegalArgumentException("Inventory result references unknown order");
-            if(!row.reservation.equals(result.reservationId()) || result.generation()!=1 || result.version()<=row.version) return;
+            if(!row.reservation.equals(result.reservationId()) || result.generation()!=row.generation || result.version()<=row.version) return;
             UUID expiry=UUID.nameUUIDFromBytes(("expiry:"+row.reservation).getBytes(StandardCharsets.UTF_8));
-            if(!Set.of(row.reserve,row.release,expiry).contains(result.commandId())) throw new IllegalArgumentException("Unknown inventory command result");
-            jdbc.update("UPDATE customer_order SET inventory_version=? WHERE id=?",result.version(),row.id.toString());
+            if(!expiry.equals(result.commandId()) && !Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM order_inventory_command WHERE command_id=? AND order_id=?)",Boolean.class,result.commandId().toString(),row.id.toString()))) throw new IllegalArgumentException("Unknown inventory command result");
+            jdbc.update("UPDATE customer_order SET inventory_version=?,inventory_state=? WHERE id=?",result.version(),result.state(),row.id.toString());
+            if(settlementInventory(row,result)) return;
             // Apply the authoritative reservation state, including a rejection carrying RELEASED.
             if(Set.of("RELEASED","EXPIRED","REJECTED").contains(result.state())) {
                 if(row.state.equals("ABORTING")) state(row,row.target,row.reason);
@@ -194,17 +195,108 @@ public final class OrderService {
             state(row,"RECONCILIATION_REQUIRED","UNEXPECTED_INVENTORY_STATE");
         });
     }
+    public record PaymentResult(UUID paymentId,UUID orderId,long amount,String currency,String status,long version,UUID refundId) { }
+    public void paymentResult(EventEnvelope envelope,PaymentResult result) {
+        String bodyHash=hash(json(envelope));
+        tx.executeWithoutResult(t->{
+            Row row=row(result.orderId(),true);
+            if(row==null) throw new IllegalArgumentException("Unknown payment order");
+            var attempts=jdbc.queryForList("SELECT payment_id FROM order_payment_attempt WHERE order_id=? AND amount=? AND currency=?",
+                    String.class,row.id.toString(),result.amount(),result.currency());
+            boolean unaccepted=attempts.isEmpty() && result.refundId()==null && Set.of("UNKNOWN","REVIEW_REQUIRED").contains(result.status());
+            if(row.amount!=result.amount() || !"KRW".equals(result.currency())
+                    || (!unaccepted && (attempts.size()!=1 || !attempts.getFirst().equals(result.paymentId().toString()))))
+                throw new IllegalArgumentException("Payment identity mismatch");
+            int inserted=jdbc.update("INSERT IGNORE INTO payment_result_receipt(event_id,body_hash) VALUES(?,?)",envelope.eventId().toString(),bodyHash);
+            String stored=jdbc.queryForObject("SELECT body_hash FROM payment_result_receipt WHERE event_id=?",String.class,envelope.eventId().toString());
+            if(!bodyHash.equals(stored)) throw new IllegalArgumentException("Conflicting payment event");
+            if(inserted==0) return;
+            // A persisted payment intent can fail before order-side acceptance; its uncertain result must not stop the consumer.
+            if(unaccepted) return;
+            if(result.refundId()!=null) {
+                var refund=jdbc.queryForMap("SELECT refund_id,refund_version FROM customer_order WHERE id=?",row.id.toString());
+                if(!result.refundId().toString().equals(refund.get("refund_id"))) throw new IllegalArgumentException("Refund identity mismatch");
+                if(result.version()<=((Number)refund.get("refund_version")).longValue()) return;
+                jdbc.update("UPDATE customer_order SET refund_version=? WHERE id=?",result.version(),row.id.toString());
+                if(!row.state.equals("REFUND_PENDING")) return;
+                if(result.status().equals("SUCCEEDED")) state(row,"REFUNDED","INVENTORY_UNAVAILABLE_REFUNDED");
+                else jdbc.update("UPDATE customer_order SET reason='REFUND_REVIEW_REQUIRED' WHERE id=?",row.id.toString());
+                return;
+            }
+            long version=jdbc.queryForObject("SELECT payment_version FROM customer_order WHERE id=?",Long.class,row.id.toString());
+            if(result.version()<=version) return;
+            if(Set.of("SUCCEEDED","FAILED").contains(row.paymentStatus==null?"":row.paymentStatus)
+                    && !row.paymentStatus.equals(result.status())) throw new IllegalArgumentException("Conflicting terminal payment result");
+            jdbc.update("UPDATE customer_order SET payment_version=?,payment_status=? WHERE id=?",result.version(),result.status(),row.id.toString());
+            if(!Set.of("PAYMENT_PROCESSING","RECONCILIATION_REQUIRED").contains(row.state)) return;
+            if(result.status().equals("FAILED")) {
+                if(inactive(row.inventoryState)) state(row,"REJECTED","PAYMENT_FAILED");
+                else { abort(row,"REJECTED","PAYMENT_FAILED"); if(row.releaseRequested) freshRelease(row); }
+            } else if(result.status().equals("SUCCEEDED")) {
+                if("COMMITTED".equals(row.inventoryState)) state(row,"PAID",null);
+                else if(inactive(row.inventoryState)) reacquire(row);
+                else if(!row.releaseRequested && row.expires!=null && row.expires.isAfter(now())) commit(row);
+                else { state(row,"REACQUIRING","WAITING_PREVIOUS_RELEASE"); freshRelease(row); }
+            }
+        });
+    }
+    private boolean inactive(String state) { return state!=null && Set.of("RELEASED","EXPIRED","REJECTED","ABSENT").contains(state); }
+    private UUID commitId(Row row) { return UUID.nameUUIDFromBytes(("commit:"+row.reservation).getBytes(StandardCharsets.UTF_8)); }
+    private void commit(Row row) {
+        state(row,"PAYMENT_CONFIRMING",null);
+        append(new Command(commitId(row),"COMMIT",row.id,row.reservation,row.generation,List.of(),null,null),now());
+    }
+    private void freshRelease(Row row) {
+        UUID id=UUID.randomUUID();
+        jdbc.update("UPDATE customer_order SET release_command_id=?,release_requested=TRUE WHERE id=?",id.toString(),row.id.toString());
+        append(new Command(id,"RELEASE",row.id,row.reservation,row.generation,List.of(),null,null),now());
+    }
+    private void reacquire(Row row) {
+        if(row.generation>=2) { refund(row); return; }
+        UUID reservation=UUID.randomUUID(),command=UUID.randomUUID(),release=UUID.randomUUID();
+        Instant deadline=now().plusSeconds(30);
+        jdbc.update("""
+                UPDATE customer_order SET status='REACQUIRING',reason=NULL,reservation_id=?,reserve_command_id=?,release_command_id=?,
+                release_requested=FALSE,generation=generation+1,inventory_state=NULL,prepare_deadline=?,reserved_at=NULL,expires_at=NULL WHERE id=?
+                """,reservation.toString(),command.toString(),release.toString(),Timestamp.from(deadline),row.id.toString());
+        append(new Command(command,"REACQUIRE",row.id,reservation,row.generation+1,
+                row.items.stream().map(l->new CommandItem(l.skuId(),l.quantity(),l.unitPrice())).toList(),deadline,null),now());
+    }
+    private boolean settlementInventory(Row row,Result result) {
+        if(!Set.of("PAYMENT_CONFIRMING","REACQUIRING","PAID","REFUND_PENDING","REFUNDED").contains(row.state)) return false;
+        if(row.state.equals("REFUND_PENDING")||row.state.equals("REFUNDED")) return true;
+        if(result.state().equals("COMMITTED")) { state(row,"PAID",null); return true; }
+        if(row.state.equals("PAID")) throw new IllegalArgumentException("Committed inventory changed unexpectedly");
+        if(inactive(result.state())) { if(row.generation==1) reacquire(row); else refund(row); return true; }
+        if(result.state().equals("RESERVED") && row.state.equals("REACQUIRING") && row.generation>1) {
+            if(result.reservedAt()==null || result.expiresAt()==null || !result.expiresAt().isAfter(result.reservedAt()))
+                throw new IllegalArgumentException("Invalid reacquisition lifetime");
+            jdbc.update("UPDATE customer_order SET reserved_at=?,expires_at=? WHERE id=?",
+                    Timestamp.from(result.reservedAt()),Timestamp.from(result.expiresAt()),row.id.toString());
+            commit(row); return true;
+        }
+        if(result.eventType().equals("InventoryCommandRejected")) state(row,"RECONCILIATION_REQUIRED","INVENTORY_SETTLEMENT_REJECTED");
+        return true;
+    }
+    private void refund(Row row) {
+        UUID refund=UUID.randomUUID();
+        String payment=jdbc.queryForObject("SELECT payment_id FROM order_payment_attempt WHERE order_id=?",String.class,row.id.toString());
+        jdbc.update("UPDATE customer_order SET status='REFUND_PENDING',reason='INVENTORY_UNAVAILABLE',refund_id=? WHERE id=?",refund.toString(),row.id.toString());
+        var payload=mapper.valueToTree(Map.of("refundId",refund,"paymentId",payment,"orderId",row.id,"amount",row.amount,"currency","KRW"));
+        outbox.append(new OutboxRecord("pueblo.payment.refunds.v1",row.id.toString(),new EventEnvelope(refund,"RefundRequested",1,"order-service",row.id.toString(),1,now(),row.id.toString(),payment,null,payload)));
+    }
     private void abort(Row row,String target,String reason) {
         jdbc.update("UPDATE customer_order SET status='ABORTING',cancellation_target=?,reason=? WHERE id=?",target,reason,row.id.toString());
         release(row);
     }
     private void release(Row row) {
         if(row.releaseRequested) return;
-        append(new Command(row.release,"RELEASE",row.id,row.reservation,1,List.of(),null,null),now());
+        append(new Command(row.release,"RELEASE",row.id,row.reservation,row.generation,List.of(),null,null),now());
         jdbc.update("UPDATE customer_order SET release_requested=TRUE WHERE id=?",row.id.toString());
     }
     private void append(Command command,Instant now) {
         String order=command.orderId().toString();
+        jdbc.update("INSERT IGNORE INTO order_inventory_command(command_id,order_id) VALUES(?,?)",command.commandId().toString(),order);
         outbox.append(new OutboxRecord(COMMANDS_TOPIC,order,new EventEnvelope(command.commandId(),"InventoryCommand",1,"order-service",order,
                 command.type().equals("RESERVE")?1:2,now,order,null,null,mapper.valueToTree(command))));
     }
@@ -217,12 +309,12 @@ public final class OrderService {
         return row;
     }
     private record Row(UUID id,UUID user,String state,String reason,String target,UUID reservation,UUID reserve,UUID release,
-            boolean releaseRequested,long version,Instant deadline,Instant expires,Instant created,List<Line> items,long amount,Shipping shipping) { }
+            boolean releaseRequested,long version,int generation,String inventoryState,String paymentStatus,Instant deadline,Instant expires,Instant created,List<Line> items,long amount,Shipping shipping) { }
     private Row row(UUID id,boolean lock) {
         return jdbc.query("SELECT * FROM customer_order WHERE id=?"+(lock?" FOR UPDATE":""),(r,n)->new Row(id,UUID.fromString(r.getString("user_id")),
                 r.getString("status"),r.getString("reason"),r.getString("cancellation_target"),UUID.fromString(r.getString("reservation_id")),
                 UUID.fromString(r.getString("reserve_command_id")),UUID.fromString(r.getString("release_command_id")),r.getBoolean("release_requested"),
-                r.getLong("inventory_version"),r.getTimestamp("prepare_deadline").toInstant(),r.getTimestamp("expires_at")==null?null:r.getTimestamp("expires_at").toInstant(),
+                r.getLong("inventory_version"),r.getInt("generation"),r.getString("inventory_state"),r.getString("payment_status"),r.getTimestamp("prepare_deadline").toInstant(),r.getTimestamp("expires_at")==null?null:r.getTimestamp("expires_at").toInstant(),
                 r.getTimestamp("created_at").toInstant(),lines(r.getString("items")),r.getLong("total_amount"),read(r.getString("shipping"),Shipping.class)),id.toString())
                 .stream().findFirst().orElse(null);
     }

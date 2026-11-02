@@ -57,6 +57,37 @@ public final class PaymentService {
         return view(row(row.order));
     }
     public View get(UUID user,UUID order) { return view(owned(user,order)); }
+    /** Owner-triggered provider read. No approval, refund or order mutation is performed here. */
+    public View recheck(UUID user,UUID orderId) {
+        Attempt before=owned(user,orderId);
+        if(Set.of("SUCCEEDED","FAILED").contains(before.state)) return view(before);
+        String owner=UUID.randomUUID().toString();
+        boolean claimed=Boolean.TRUE.equals(tx.execute(s->{
+            int changed=jdbc.update("""
+                    UPDATE payment_attempt SET lease_owner=?,lease_until=UTC_TIMESTAMP(6)+INTERVAL 60 SECOND
+                    WHERE order_id=? AND status IN ('PREPARING','PROCESSING','UNKNOWN','REVIEW_REQUIRED')
+                    AND next_check_at<=UTC_TIMESTAMP(6) AND (lease_until IS NULL OR lease_until<UTC_TIMESTAMP(6))
+                    """,owner,orderId.toString());
+            if(changed==1) jdbc.update("INSERT INTO payment_recheck_audit(id,payment_id,actor_id,previous_status) VALUES(?,?,?,?)",
+                    owner,before.id.toString(),user.toString(),before.state);
+            return changed==1;
+        }));
+        if(!claimed) return view(row(orderId));
+        Attempt current=row(orderId);
+        String outcome="UNKNOWN";
+        try {
+            JsonNode ready=clients.attempt(orderId);
+            outcome=matches(ready,current)?TossClient.outcome(toss.find(current.key),current.order,current.key,current.amount):"REVIEW_REQUIRED";
+        } catch(BusinessException|JsonHttp.Unavailable ex) { /* Preserve uncertainty, including 404. */ }
+        if(outcome.equals("UNKNOWN")&&(current.state.equals("REVIEW_REQUIRED")||current.checks>=20)) outcome="REVIEW_REQUIRED";
+        String result=outcome;
+        tx.executeWithoutResult(s->{
+            finish(current,owner,result);
+            jdbc.update("UPDATE payment_recheck_audit SET resulting_status=?,completed_at=UTC_TIMESTAMP(6) WHERE id=?",
+                    row(orderId).state,owner);
+        });
+        return view(row(orderId));
+    }
     public int reconcileBatch() {
         var ids=jdbc.queryForList("""
                 SELECT order_id FROM payment_attempt WHERE status IN ('PREPARING','PROCESSING','UNKNOWN')
@@ -79,7 +110,7 @@ public final class PaymentService {
         try {
             // Recovery never needs to retain a browser JWT and never sends another confirm.
             JsonNode ready=clients.attempt(orderId);
-            outcome=matches(ready,row)?TossClient.outcome(toss.find(orderId),row.order,row.key,row.amount):"REVIEW_REQUIRED";
+            outcome=matches(ready,row)?TossClient.outcome(toss.find(row.key),row.order,row.key,row.amount):"REVIEW_REQUIRED";
         } catch(BusinessException|JsonHttp.Unavailable e) { /* Missing/unknown provider or order data is not proof of failure. */ }
         if(outcome.equals("UNKNOWN")&&row.checks>=20) outcome="REVIEW_REQUIRED";
         finish(row,owner,outcome);

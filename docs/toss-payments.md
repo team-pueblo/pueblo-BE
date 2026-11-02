@@ -2,7 +2,7 @@
 
 `payment-service`가 주문 서비스의 결제 접수 계약을 거쳐 토스 승인·조회 API를 호출한다. 회원·주문은 HTTP로 조회하고 결제 원장은 자신의 MySQL에만 저장한다. 기준 문서 목록은 사용자가 추가한 [toss-llms.txt](toss-llms.txt)이며 아래 공식 원문을 확인했다.
 
-- [승인·조회 API와 Payment 객체](https://docs.tosspayments.com/reference): `POST /v1/payments/confirm`, `GET /v1/payments/orders/{orderId}`.
+- [승인·조회 API와 Payment 객체](https://docs.tosspayments.com/reference): `POST /v1/payments/confirm`, `GET /v1/payments/{paymentKey}`.
 - [인증·멱등키](https://docs.tosspayments.com/reference/using-api/authorization): 시크릿 키 뒤 콜론을 붙여 Base64한 Basic 인증, POST의 `Idempotency-Key`.
 - [결제 흐름](https://docs.tosspayments.com/guides/v2/get-started/payment-flow): 프론트 인증 결과와 서버 승인을 구분한다.
 
@@ -12,7 +12,7 @@
 
 구현: JWT·회원 폐기 상태 확인, 본인 주문 금액 확인, 승인 의도 저장, 주문 결제 시도 접수, 토스 승인, 본인 결제 상태 조회, 미확정 결과 조회 복구, 서명된 결과 Outbox.
 
-후속 범위: 프론트 결제 SDK 화면, 주문 서비스의 결제 결과 소비, 재고 COMMIT/재확보, 자동 환불·취소, 웹훅, 운영자 재처리 API. 따라서 결제 `SUCCEEDED`가 주문 `PAID`나 출고 가능 상태로 자동 반영되지는 않는다. 주문은 기존 예약 만료 정책에 따라 확인 필요 상태로 전환될 수 있다.
+주문 결과 소비·재고 COMMIT/재확보·재확보 실패 전액 환불·본인 결제 재조회는 [결제 복구](payment-recovery.md)에 구현했다. 별도 기능 플래그를 켜야 하며 `SUCCEEDED` 응답만으로 주문 완료를 표시하지 않고 주문 `PAID`를 확인한다. 웹훅·일반 사용자 취소/환불·운영자 재실행 API는 후속 범위다.
 
 초기 검증은 카드·간편결제로 진행한다. 가상계좌의 `WAITING_FOR_DEPOSIT`은 성공으로 처리하지 않으며 입금·환불 흐름은 아직 지원하지 않는다.
 
@@ -82,7 +82,7 @@ docker compose up -d --build order-service payment-service
 
 승인 의도 저장 후 실제 호출 전에 종료되었거나 주문 접수 응답만 유실된 경우에도 **복구는 조회만** 한다. 조회에서 발견되지 않으면 확인 필요 상태로 남을 수 있다. 이런 건을 자동으로 새 승인하는 기능과 운영자 재처리는 후속 범위다. 결과 확인 중인 결제에 새 주문·새 결제를 유도하지 않는다.
 
-결과 변경과 Outbox는 한 DB 트랜잭션이다. 토픽은 `pueblo.payment.results.v1`, key는 주문 ID, 이벤트는 `PaymentSucceeded`, `PaymentFailed`, `PaymentUncertain`이며 `pueblo-payment-result-signature` HMAC 헤더를 붙인다. payload는 paymentId·orderId·amount·currency·status·version만 포함한다. 후속 소비자는 서명·주문 식별·금액·중복·버전을 검증해야 한다. 아직 주문 소비자는 없으므로 이벤트 발행이 주문 확정을 의미하지 않는다.
+결과 변경과 Outbox는 한 DB 트랜잭션이다. 토픽은 `pueblo.payment.results.v1`, key는 주문 ID, 이벤트는 `PaymentSucceeded`, `PaymentFailed`, `PaymentUncertain`이며 `pueblo-payment-result-signature` HMAC 헤더를 붙인다. payload는 paymentId·orderId·amount·currency·status·version만 포함한다. 후속 소비자는 서명·주문 식별·금액·중복·버전을 검증해야 한다. 주문 결과 소비는 별도 플래그로 활성화하며 재고 확정 결과까지 받아야 PAID가 된다.
 
 V2 마이그레이션은 결제 DB에 `payment_attempt`를 추가한다. 로그·응답에 원문 키·제공사 오류 본문을 넣지 않는다. paymentKey는 후속 조회와 일치 검사에 필요한 식별자로 결제 DB에 보관하며 운영 접근·보존 기간 정책은 실제 판매 전에 확정한다.
 

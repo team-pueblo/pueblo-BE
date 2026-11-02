@@ -55,7 +55,7 @@ class OrderFlowIntegrationTest {
             }
         }
         try(Admin admin=Admin.create(Map.of("bootstrap.servers",KAFKA.getBootstrapServers()))) {
-            admin.createTopics(List.of(new NewTopic(OrderService.COMMANDS_TOPIC,1,(short)1),new NewTopic(OrderService.RESULTS_TOPIC,1,(short)1))).all().get(20,TimeUnit.SECONDS);
+            admin.createTopics(List.of(new NewTopic(OrderService.COMMANDS_TOPIC,1,(short)1),new NewTopic(OrderService.RESULTS_TOPIC,1,(short)1),new NewTopic("pueblo.payment.results.v1",1,(short)1),new NewTopic("pueblo.payment.refunds.v1",1,(short)1))).all().get(20,TimeUnit.SECONDS);
         }
         member=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
         member.createContext("/api/v1/me",exchange->{
@@ -82,6 +82,7 @@ class OrderFlowIntegrationTest {
                 "--spring.flyway.locations=filesystem:"+root+"/"+service+"-service/src/main/resources/db/migration",
                 "--spring.kafka.bootstrap-servers="+KAFKA.getBootstrapServers(),"--pueblo.messaging.polling-enabled=false",
                 "--pueblo.orders.enabled="+service.equals("order"),"--pueblo.orders.inventory-secret="+SECRET,
+                "--pueblo.orders.payment-results.enabled="+service.equals("order"),"--pueblo.orders.payment-results.secret="+SECRET,
                 "--pueblo.orders.payment-preparation.enabled="+service.equals("order"),"--pueblo.orders.payment-preparation.service-token="+PAYMENT_TOKEN,
                 "--pueblo.orders.member-url=http://127.0.0.1:"+memberPort,"--pueblo.orders.catalog-url=http://127.0.0.1:"+catalogPort,
                 "--pueblo.orders.timeout-poll-ms=3600000","--pueblo.inventory.enabled="+service.equals("catalog"),
@@ -368,4 +369,93 @@ class OrderFlowIntegrationTest {
         assertThat(data(payment("POST",id,body,"fixture-user",PAYMENT_TOKEN),200)).isEqualTo(first);
         expirePayment(id); assertThat(stock()).isEqualTo(10);
     }
+    EventEnvelope paymentEvent(UUID id,String status,long version,UUID refund) {
+        String payment=orderDb.queryForObject("SELECT payment_id FROM order_payment_attempt WHERE order_id=?",String.class,id.toString());
+        long amount=orderDb.queryForObject("SELECT total_amount FROM customer_order WHERE id=?",Long.class,id.toString());
+        var result=new OrderService.PaymentResult(UUID.fromString(payment),id,amount,"KRW",status,version,refund);
+        String type=refund!=null?(status.equals("SUCCEEDED")?"RefundSucceeded":"RefundUncertain"):
+                status.equals("SUCCEEDED")?"PaymentSucceeded":status.equals("FAILED")?"PaymentFailed":"PaymentUncertain";
+        return new EventEnvelope(UUID.randomUUID(),type,1,"payment-service",id.toString(),version,Instant.now(),id.toString(),refund==null?payment:refund.toString(),null,mapper.valueToTree(result));
+    }
+    void paymentEvent(EventEnvelope e) throws Exception {
+        String json=mapper.writeValueAsString(e);
+        var record=new org.apache.kafka.clients.producer.ProducerRecord<Object,Object>("pueblo.payment.results.v1",e.aggregateId(),json);
+        record.headers().add("pueblo-payment-result-signature",new HmacMessageSignature(SECRET).sign(json));
+        order.getBean(org.springframework.kafka.core.KafkaTemplate.class).send(record).get(10,TimeUnit.SECONDS);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(()->assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM payment_result_receipt WHERE event_id=?",Integer.class,e.eventId().toString())).isEqualTo(1));
+    }
+    UUID processing() throws Exception {
+        UUID id=readyOrder();data(payment("POST",id,paymentBody(id,UUID.randomUUID()),"fixture-user",PAYMENT_TOKEN),200);return id;
+    }
+    @Test @Order(21) void definitiveFailureReleasesOnceAndClosesOrder() throws Exception {
+        UUID id=processing();var failed=paymentEvent(id,"FAILED",2,null);
+        paymentEvent(failed);settle(id,"REJECTED");assertThat(stock()).isEqualTo(10);
+        paymentEvent(failed);paymentEvent(paymentEvent(id,"UNKNOWN",1,null));
+        assertThat(state(id)).isEqualTo("REJECTED");assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(22) void failureAfterExpiryClosesWithoutWaitingForAnotherRelease() throws Exception {
+        UUID id=processing();expirePayment(id);assertThat(stock()).isEqualTo(10);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(()->{
+            dispatch(catalog);assertThat(orderDb.queryForObject("SELECT inventory_state FROM customer_order WHERE id=?",String.class,id.toString())).isEqualTo("RELEASED");
+        });
+        paymentEvent(paymentEvent(id,"FAILED",2,null));assertThat(state(id)).isEqualTo("REJECTED");assertThat(stock()).isEqualTo(10);
+    }
+    @Test @Order(23) void successCommitsInventoryBeforePaidAndIgnoresOldEvents() throws Exception {
+        UUID id=processing();var success=paymentEvent(id,"SUCCEEDED",2,null);paymentEvent(success);
+        assertThat(state(id)).isEqualTo("PAYMENT_CONFIRMING");settle(id,"PAID");assertThat(stock()).isEqualTo(9);
+        assertThat(catalogDb.queryForObject("SELECT status FROM inventory_reservation WHERE order_id=?",String.class,id.toString())).isEqualTo("COMMITTED");
+        paymentEvent(success);paymentEvent(paymentEvent(id,"UNKNOWN",1,null));assertThat(state(id)).isEqualTo("PAID");
+    }
+    @Test @Order(24) void lateApprovalReacquiresWithNewGenerationThenCommits() throws Exception {
+        UUID id=processing();expirePayment(id);paymentEvent(paymentEvent(id,"SUCCEEDED",2,null));settle(id,"PAID");
+        assertThat(stock()).isEqualTo(9);
+        assertThat(orderDb.queryForObject("SELECT generation FROM customer_order WHERE id=?",Integer.class,id.toString())).isEqualTo(2);
+        assertThat(catalogDb.queryForObject("SELECT COUNT(*) FROM inventory_reservation WHERE order_id=? AND status='COMMITTED'",Integer.class,id.toString())).isEqualTo(1);
+    }
+    @Test @Order(25) void reacquireFailureRequestsOneRefundAndWaitsForConfirmedRefund() throws Exception {
+        UUID id=processing();expirePayment(id);catalogDb.update("UPDATE catalog_sku SET stock=0 WHERE id=?",sku.toString());
+        var success=paymentEvent(id,"SUCCEEDED",2,null);paymentEvent(success);settle(id,"REFUND_PENDING");
+        paymentEvent(success);
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE aggregate_id=? AND event_type='RefundRequested'",Integer.class,id.toString())).isEqualTo(1);
+        UUID refund=UUID.fromString(orderDb.queryForObject("SELECT refund_id FROM customer_order WHERE id=?",String.class,id.toString()));
+        paymentEvent(paymentEvent(id,"REVIEW_REQUIRED",1,refund));assertThat(state(id)).isEqualTo("REFUND_PENDING");
+        var done=paymentEvent(id,"SUCCEEDED",2,refund);paymentEvent(done);paymentEvent(done);
+        assertThat(state(id)).isEqualTo("REFUNDED");assertThat(stock()).isZero();
+    }
+    @Test @Order(26) void paymentResultRejectsForgedSignatureAndWrongAmountWithoutReceipt() throws Exception {
+        UUID id=processing();var event=paymentEvent(id,"FAILED",1,null);
+        var listener=order.getBean(PaymentResultListener.class);
+        String json=mapper.writeValueAsString(event);
+        var record=new ConsumerRecord<String,String>("pueblo.payment.results.v1",0,0,id.toString(),json);
+        assertThatThrownBy(()->listener.receive(record)).isInstanceOf(IllegalArgumentException.class);
+        var payload=(com.fasterxml.jackson.databind.node.ObjectNode)event.payload();payload.put("amount",1);
+        var bad=new EventEnvelope(event.eventId(),event.eventType(),1,event.producer(),event.aggregateId(),1,event.occurredAt(),event.correlationId(),event.causationId(),null,payload);
+        String text=mapper.writeValueAsString(bad);var signed=new ConsumerRecord<String,String>("pueblo.payment.results.v1",0,0,id.toString(),text);
+        signed.headers().add("pueblo-payment-result-signature",new HmacMessageSignature(SECRET).sign(text));
+        assertThatThrownBy(()->listener.receive(signed)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(state(id)).isEqualTo("PAYMENT_PROCESSING");
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM payment_result_receipt WHERE event_id=?",Integer.class,event.eventId().toString())).isZero();
+        expirePayment(id);
+    }
+
+    @Test @Order(27) void unacceptedPaymentUncertaintyDoesNotStopConsumptionOrChangeOrder() throws Exception {
+        UUID id=readyOrder();long amount=orderDb.queryForObject("SELECT total_amount FROM customer_order WHERE id=?",Long.class,id.toString());
+        UUID payment=UUID.randomUUID();
+        var result=new OrderService.PaymentResult(payment,id,amount,"KRW","REVIEW_REQUIRED",1,null);
+        var event=new EventEnvelope(UUID.randomUUID(),"PaymentUncertain",1,"payment-service",id.toString(),1,Instant.now(),id.toString(),payment.toString(),null,mapper.valueToTree(result));
+        paymentEvent(event);assertThat(state(id)).isEqualTo("PENDING_PAYMENT");
+        data(request("POST","/api/v1/me/orders/"+id+"/cancellations",null,"fixture-user",null),202);settle(id,"CANCELED");
+    }
+    @Test @Order(28) void failureTransitionReceiptAndReleaseOutboxRollbackTogether() throws Exception {
+        UUID id=processing();var event=paymentEvent(id,"FAILED",1,null);
+        var failing=org.mockito.Mockito.mock(JdbcOutbox.class);
+        org.mockito.Mockito.doThrow(new IllegalStateException("injected failure")).when(failing).append(org.mockito.ArgumentMatchers.any());
+        var service=new OrderService(orderDb,mapper,failing,order.getBean(com.pueblo.order.checkout.ServiceClients.class),order.getBean(org.springframework.transaction.PlatformTransactionManager.class),"purchase-v1");
+        var payload=mapper.treeToValue(event.payload(),OrderService.PaymentResult.class);
+        assertThatThrownBy(()->service.paymentResult(event,payload)).isInstanceOf(IllegalStateException.class);
+        assertThat(state(id)).isEqualTo("PAYMENT_PROCESSING");
+        assertThat(orderDb.queryForObject("SELECT COUNT(*) FROM payment_result_receipt WHERE event_id=?",Integer.class,event.eventId().toString())).isZero();
+        paymentEvent(event);settle(id,"REJECTED");assertThat(stock()).isEqualTo(10);
+    }
+
 }
